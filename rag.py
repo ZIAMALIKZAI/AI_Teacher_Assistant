@@ -23,7 +23,7 @@ COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "ai_teacher_documents")
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
 )
-DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+DEFAULT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
 def clean_text(text: str) -> str:
