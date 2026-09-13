@@ -4,7 +4,6 @@ and QR Code attendance management (generation & decoding).
 """
 
 import os
-import io
 import json
 import datetime
 import fitz  # PyMuPDF
@@ -16,7 +15,7 @@ import cv2
 import numpy as np
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 tess_cmd = os.getenv("TESSERACT_CMD")
@@ -24,10 +23,8 @@ if tess_cmd:
     pytesseract.pytesseract.tesseract_cmd = tess_cmd
 
 
-# -------------------------------------------------------------
-# Document & Image Text Extraction
-# -------------------------------------------------------------
 def extract_text_from_file(file_path: str) -> list[dict]:
+    """Extracts text page-by-page from PDF or image files with OCR fallback."""
     if not file_path or not os.path.exists(file_path):
         return []
 
@@ -67,10 +64,8 @@ def extract_text_from_file(file_path: str) -> list[dict]:
     return records
 
 
-# -------------------------------------------------------------
-# Marks & Award List Data Processing
-# -------------------------------------------------------------
 def parse_marks_file(file_path: str) -> pd.DataFrame:
+    """Loads and standardizes student marks lists (CSV or Excel)."""
     if not file_path or not os.path.exists(file_path):
         return pd.DataFrame()
 
@@ -168,7 +163,7 @@ def lookup_student_record(df: pd.DataFrame, roll_no: str, subject_query: str = "
 # QR Code Attendance Management
 # -------------------------------------------------------------
 def generate_student_qr_card(roll_no: str, name: str, class_name: str, output_path: str) -> str:
-    """Creates a printable PNG attendance card containing a structured JSON QR code."""
+    """Builds a QR ID card containing encoded student JSON data."""
     qr_data = json.dumps({"roll_no": str(roll_no).strip(), "name": str(name).strip(), "class": str(class_name).strip()})
     
     qr = qrcode.QRCode(version=1, box_size=8, border=2)
@@ -176,47 +171,36 @@ def generate_student_qr_card(roll_no: str, name: str, class_name: str, output_pa
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-    card = Image.new("RGB", (360, 440), color="white")
-    card.paste(qr_img, (30, 20))
-
-    # Save to file
+    card = Image.new("RGB", (340, 360), color="white")
+    card.paste(qr_img, (20, 20))
     card.save(output_path)
     return output_path
 
 
-def decode_qr_image(image_input) -> dict:
-    """
-    Decodes QR code from an uploaded image or webcam frame using OpenCV.
-    """
-    if image_input is None:
-        return {"error": "No image frame received."}
+def decode_qr_image(image_bytes: bytes) -> dict:
+    """Decodes QR code from camera bytes or uploaded image buffer."""
+    if not image_bytes:
+        return {"error": "No image data provided."}
 
-    if isinstance(image_input, str):
-        img = cv2.imread(image_input)
-    elif isinstance(image_input, np.ndarray):
-        img = image_input
-    elif isinstance(image_input, Image.Image):
-        img = cv2.cvtColor(np.array(image_input), cv2.COLOR_RGB2BGR)
-    else:
-        return {"error": "Unsupported image format."}
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return {"error": "Could not parse image."}
 
     detector = cv2.QRCodeDetector()
-    data, bbox, _ = detector.detectAndDecode(img)
+    data, _, _ = detector.detectAndDecode(img)
 
     if not data:
-        return {"error": "No valid QR code detected in the frame."}
+        return {"error": "No QR code found in the image."}
 
     try:
-        parsed = json.loads(data)
-        return parsed
+        return json.loads(data)
     except Exception:
         return {"raw_data": data}
 
 
 def record_attendance(qr_data: dict, log_file: str = "attendance_log.csv") -> tuple[str, pd.DataFrame]:
-    """
-    Appends a verified attendance scan with a live timestamp to the attendance CSV.
-    """
+    """Records timestamped attendance into an exportable CSV."""
     if "error" in qr_data:
         return qr_data["error"], pd.DataFrame()
 
@@ -232,11 +216,10 @@ def record_attendance(qr_data: dict, log_file: str = "attendance_log.csv") -> tu
     else:
         df = pd.DataFrame(columns=cols)
 
-    # Check if student already marked present today
     if not df.empty and "Date" in df.columns and "Roll Number" in df.columns:
         already_present = df[(df["Date"] == date_str) & (df["Roll Number"].astype(str) == str(roll_no))]
         if not already_present.empty:
-            return f"⚠️ Student {name} (Roll: {roll_no}) is ALREADY marked present today!", df
+            return f"⚠️ Student {name} (Roll: {roll_no}) is already marked present today!", df
 
     new_entry = pd.DataFrame([{
         "Date": date_str,
