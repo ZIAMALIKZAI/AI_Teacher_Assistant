@@ -174,7 +174,7 @@ with tab4:
         df_marks = parse_marks_file(m_path)
         st.session_state["marks_df"] = df_marks
         # Reset index to avoid index-column collision in PyArrow
-st.dataframe(df_marks.head(10).reset_index(drop=True), use_container_width=True)
+        st.dataframe(df_marks.head(10).reset_index(drop=True), use_container_width=True)
 
     st.markdown("---")
     st.markdown("##### Search Student Record")
