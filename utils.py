@@ -1,448 +1,325 @@
 """
-Utility functions:
-- PDF/OCR marks-list processing
-- marks calculation
-- grade calculation
-- question-paper validation
-- PDF generation
+utils.py: PDF extraction, OCR, mark calculations, PDF certificate rendering,
+and QR Code attendance management (generation & decoding).
 """
 
 import os
-import re
-from io import BytesIO
-
-import fitz
-import pandas as pd
-import pytesseract
+import io
+import json
+import datetime
+import fitz  # PyMuPDF
 from PIL import Image
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+import pytesseract
+import pandas as pd
+import qrcode
+import cv2
+import numpy as np
 from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-    PageBreak,
-)
+
+tess_cmd = os.getenv("TESSERACT_CMD")
+if tess_cmd:
+    pytesseract.pytesseract.tesseract_cmd = tess_cmd
 
 
-def build_text_pdf(title: str, text: str) -> bytes:
-    """Create a simple printable PDF."""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=18 * mm,
-        leftMargin=18 * mm,
-        topMargin=18 * mm,
-        bottomMargin=18 * mm,
-    )
-    styles = getSampleStyleSheet()
-    story = [
-        Paragraph(title, styles["Title"]),
-        Spacer(1, 8),
-    ]
+# -------------------------------------------------------------
+# Document & Image Text Extraction
+# -------------------------------------------------------------
+def extract_text_from_file(file_path: str) -> list[dict]:
+    if not file_path or not os.path.exists(file_path):
+        return []
 
-    for paragraph in text.split("\n"):
-        if paragraph.strip():
-            story.append(Paragraph(paragraph.replace("&", "&amp;"), styles["BodyText"]))
-            story.append(Spacer(1, 4))
+    ext = os.path.splitext(file_path)[1].lower()
+    records = []
+    base_name = os.path.basename(file_path)
 
-    doc.build(story)
-    return buffer.getvalue()
+    if ext == ".pdf":
+        doc = fitz.open(file_path)
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            text = page.get_text("text").strip()
 
+            if len(text) < 40:
+                pix = page.get_pixmap(dpi=150)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                try:
+                    ocr_text = pytesseract.image_to_string(img).strip()
+                    if len(ocr_text) > len(text):
+                        text = ocr_text
+                except Exception:
+                    pass
 
-def build_question_paper_pdf(
-    school, exam_type, class_name, subject, subject_code,
-    exam_time, total_marks, text
-) -> bytes:
-    """Make a printable A4 question-paper PDF from generated text."""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=15 * mm,
-        leftMargin=15 * mm,
-        topMargin=15 * mm,
-        bottomMargin=15 * mm,
-    )
-    styles = getSampleStyleSheet()
-    center = ParagraphStyle(
-        "center",
-        parent=styles["Normal"],
-        alignment=TA_CENTER,
-        fontSize=10,
-    )
-    story = [
-        Paragraph(f"<b>{school}</b>", styles["Title"]),
-        Paragraph(exam_type, center),
-        Spacer(1, 6),
-        Paragraph(
-            f"Class: {class_name} &nbsp;&nbsp; Subject: {subject} "
-            f"&nbsp;&nbsp; Code: {subject_code}",
-            center,
-        ),
-        Paragraph(
-            f"Time: {exam_time} &nbsp;&nbsp; Total Marks: {total_marks}",
-            center,
-        ),
-        Spacer(1, 12),
-    ]
-
-    for line in text.splitlines():
-        safe = (
-            line.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-        if safe.strip():
-            story.append(Paragraph(safe, styles["BodyText"]))
-            story.append(Spacer(1, 4))
-
-    doc.build(story)
-    return buffer.getvalue()
-
-
-def _normalise(value) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().lower()
-
-
-def detect_columns(df: pd.DataFrame) -> dict:
-    """Find common award-list column names without forcing one exact format."""
-    aliases = {
-        "roll_number": ["roll no", "roll number", "roll", "roll_no", "rollnumber"],
-        "student_name": ["student name", "name", "student"],
-        "subject": ["subject", "subject name"],
-        "subject_code": ["subject code", "code", "subject_code"],
-        "marks": ["marks", "obtained marks", "obtained", "score"],
-        "total_marks": ["total marks", "maximum marks", "max marks", "total"],
-        "father_name": ["father name", "father", "guardian"],
-        "class": ["class", "grade"],
-        "section": ["section"],
-    }
-
-    normalized = {_normalise(c): c for c in df.columns}
-    found = {}
-
-    for key, names in aliases.items():
-        for alias in names:
-            if alias in normalized:
-                found[key] = normalized[alias]
-                break
-    return found
-
-
-def extract_marks_file(uploaded_file) -> pd.DataFrame:
-    """Read Excel/CSV directly, or OCR a PDF/image marks list."""
-    name = uploaded_file.name.lower()
-    data = uploaded_file.getvalue()
-
-    if name.endswith(".csv"):
-        return pd.read_csv(BytesIO(data))
-
-    if name.endswith(".xlsx") or name.endswith(".xls"):
-        return pd.read_excel(BytesIO(data))
-
-    text = ""
-    if name.endswith(".pdf"):
-        doc = fitz.open(stream=data, filetype="pdf")
-        for page in doc:
-            page_text = page.get_text("text")
-            if page_text.strip():
-                text += "\n" + page_text
-            else:
-                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-                image = Image.frombytes(
-                    "RGB", [pix.width, pix.height], pix.samples
-                )
-                text += "\n" + pytesseract.image_to_string(image)
+            if text:
+                records.append({"page": page_num + 1, "text": text, "source": base_name})
         doc.close()
-    elif name.endswith((".jpg", ".jpeg", ".png")):
-        image = Image.open(BytesIO(data)).convert("RGB")
-        text = pytesseract.image_to_string(image)
-    else:
-        raise ValueError("Unsupported marks file type.")
 
-    return text_to_marks_dataframe(text)
+    elif ext in [".jpg", ".jpeg", ".png"]:
+        try:
+            img = Image.open(file_path)
+            ocr_text = pytesseract.image_to_string(img).strip()
+            if ocr_text:
+                records.append({"page": 1, "text": ocr_text, "source": base_name})
+        except Exception as err:
+            records.append({"page": 1, "text": f"Error performing OCR: {str(err)}", "source": base_name})
+
+    return records
 
 
-def text_to_marks_dataframe(text: str) -> pd.DataFrame:
-    """
-    Convert simple OCR/text award-list rows into a DataFrame.
+# -------------------------------------------------------------
+# Marks & Award List Data Processing
+# -------------------------------------------------------------
+def parse_marks_file(file_path: str) -> pd.DataFrame:
+    if not file_path or not os.path.exists(file_path):
+        return pd.DataFrame()
 
-    Expected practical format:
-    Roll No | Student Name | Subject Code | Subject | Marks
-    """
-    rows = []
-    for raw_line in text.splitlines():
-        line = re.sub(r"\s+", " ", raw_line.strip())
-        if not line:
-            continue
+    ext = os.path.splitext(file_path)[1].lower()
+    df = pd.DataFrame()
 
-        # Accept pipes, tabs, commas, or multiple spaces as separators.
-        parts = [p.strip() for p in re.split(r"\||\t|,", line) if p.strip()]
-        if len(parts) >= 5:
-            rows.append(parts[:5])
+    try:
+        if ext in [".xlsx", ".xls"]:
+            df = pd.read_excel(file_path)
+        elif ext == ".csv":
+            df = pd.read_csv(file_path)
+    except Exception:
+        return pd.DataFrame()
 
-    if not rows:
-        raise ValueError(
-            "Could not identify tabular marks data in the PDF/image. "
-            "For best results, upload Excel or CSV."
-        )
+    if df.empty:
+        return df
 
-    first = [x.lower() for x in rows[0]]
-    header_words = {"roll", "roll no", "roll number", "student name", "subject"}
-    if any(word in " ".join(first) for word in header_words):
-        rows = rows[1:]
+    cleaned_columns = {}
+    for col in df.columns:
+        norm = str(col).strip().lower().replace(" ", "_").replace(".", "")
+        if "roll" in norm:
+            cleaned_columns[col] = "roll_number"
+        elif "student" in norm or "name" in norm:
+            cleaned_columns[col] = "student_name"
+        elif "subject_code" in norm or "code" in norm:
+            cleaned_columns[col] = "subject_code"
+        elif "subject" in norm:
+            cleaned_columns[col] = "subject"
+        elif "total" in norm:
+            cleaned_columns[col] = "total_marks"
+        elif "mark" in norm or "obtained" in norm:
+            cleaned_columns[col] = "obtained_marks"
+        else:
+            cleaned_columns[col] = norm
 
-    df = pd.DataFrame(
-        rows,
-        columns=["Roll No", "Student Name", "Subject Code", "Subject", "Marks"],
-    )
+    df = df.rename(columns=cleaned_columns)
+    if "roll_number" in df.columns:
+        df["roll_number"] = df["roll_number"].astype(str).str.strip()
     return df
 
 
-def default_grade_rules():
-    return [
-        (90, 100, "A+"),
-        (80, 89.999, "A"),
-        (70, 79.999, "B"),
-        (60, 69.999, "C"),
-        (50, 59.999, "D"),
-        (0, 49.999, "E"),
-    ]
+def calculate_grade(percentage: float, criteria: dict = None) -> tuple[str, str]:
+    if criteria is None:
+        criteria = {"A+": 90, "A": 80, "B": 70, "C": 60, "D": 50, "Passing": 50}
+
+    passing_thresh = criteria.get("Passing", 50)
+    status = "Pass" if percentage >= passing_thresh else "Fail"
+
+    if percentage >= criteria.get("A+", 90):
+        grade = "A+"
+    elif percentage >= criteria.get("A", 80):
+        grade = "A"
+    elif percentage >= criteria.get("B", 70):
+        grade = "B"
+    elif percentage >= criteria.get("C", 60):
+        grade = "C"
+    elif percentage >= criteria.get("D", 50):
+        grade = "D"
+    else:
+        grade = "E"
+
+    return grade, status
 
 
-def calculate_grade(percentage: float, rules=None) -> str:
-    rules = rules or default_grade_rules()
-    for low, high, grade in rules:
-        if low <= percentage <= high:
-            return grade
-    return "N/A"
+def lookup_student_record(df: pd.DataFrame, roll_no: str, subject_query: str = "") -> dict:
+    if df.empty or "roll_number" not in df.columns:
+        return {"error": "Award list data is missing or has no valid 'roll_number' column."}
 
-
-def calculate_result(
-    df: pd.DataFrame,
-    roll_number: str,
-    subject_query: str,
-    total_marks: int,
-    pass_percentage: float = 50.0,
-):
-    """Safely match roll + subject/code and calculate the result."""
-    columns = detect_columns(df)
-    if "roll_number" not in columns:
-        raise ValueError("Award list needs a Roll Number column.")
-    if "marks" not in columns:
-        raise ValueError("Award list needs a Marks column.")
-
-    roll_col = columns["roll_number"]
-    subject_col = columns.get("subject")
-    code_col = columns.get("subject_code")
-
-    matches = df[
-        df[roll_col].astype(str).str.strip().str.lower()
-        == str(roll_number).strip().lower()
-    ].copy()
-
-    if subject_query and not matches.empty:
-        q = str(subject_query).strip().lower()
-        if subject_col:
-            mask = matches[subject_col].astype(str).str.strip().str.lower() == q
-        else:
-            mask = False
-
-        if code_col:
-            mask = mask | (
-                matches[code_col].astype(str).str.strip().str.lower() == q
-            )
-        matches = matches[mask]
+    roll_no = str(roll_no).strip()
+    matches = df[df["roll_number"] == roll_no]
 
     if matches.empty:
-        return None
+        return {"error": f"Roll Number '{roll_no}' not found in the uploaded list."}
 
-    row = matches.iloc[0]
+    if subject_query and "subject" in matches.columns:
+        subj_filtered = matches[matches["subject"].astype(str).str.contains(subject_query.strip(), case=False, na=False)]
+        if not subj_filtered.empty:
+            matches = subj_filtered
+
+    record = matches.iloc[0].to_dict()
+    obtained = float(record.get("obtained_marks", 0))
+    total = float(record.get("total_marks", 100))
+    percentage = round((obtained / total) * 100, 2) if total > 0 else 0.0
+    grade, status = calculate_grade(percentage)
+
+    record.update({
+        "calculated_percentage": percentage,
+        "calculated_grade": grade,
+        "calculated_status": status
+    })
+    return record
+
+
+# -------------------------------------------------------------
+# QR Code Attendance Management
+# -------------------------------------------------------------
+def generate_student_qr_card(roll_no: str, name: str, class_name: str, output_path: str) -> str:
+    """Creates a printable PNG attendance card containing a structured JSON QR code."""
+    qr_data = json.dumps({"roll_no": str(roll_no).strip(), "name": str(name).strip(), "class": str(class_name).strip()})
+    
+    qr = qrcode.QRCode(version=1, box_size=8, border=2)
+    qr.add_data(qr_data)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+    card = Image.new("RGB", (360, 440), color="white")
+    card.paste(qr_img, (30, 20))
+
+    # Save to file
+    card.save(output_path)
+    return output_path
+
+
+def decode_qr_image(image_input) -> dict:
+    """
+    Decodes QR code from an uploaded image or webcam frame using OpenCV.
+    """
+    if image_input is None:
+        return {"error": "No image frame received."}
+
+    if isinstance(image_input, str):
+        img = cv2.imread(image_input)
+    elif isinstance(image_input, np.ndarray):
+        img = image_input
+    elif isinstance(image_input, Image.Image):
+        img = cv2.cvtColor(np.array(image_input), cv2.COLOR_RGB2BGR)
+    else:
+        return {"error": "Unsupported image format."}
+
+    detector = cv2.QRCodeDetector()
+    data, bbox, _ = detector.detectAndDecode(img)
+
+    if not data:
+        return {"error": "No valid QR code detected in the frame."}
+
     try:
-        obtained = float(str(row[columns["marks"]]).replace(",", ""))
-    except ValueError as exc:
-        raise ValueError("Obtained marks are not numeric.") from exc
-
-    percentage = round((obtained / total_marks) * 100, 2)
-    grade = calculate_grade(percentage)
-
-    return {
-        "roll_number": str(row[roll_col]),
-        "student_name": str(row[columns.get("student_name", roll_col)]),
-        "class": str(row[columns["class"]]) if "class" in columns else "",
-        "section": str(row[columns["section"]]) if "section" in columns else "",
-        "subject": str(row[subject_col]) if subject_col else subject_query,
-        "subject_code": str(row[code_col]) if code_col else "",
-        "obtained_marks": obtained,
-        "total_marks": total_marks,
-        "percentage": percentage,
-        "grade": grade,
-        "result": "PASS" if percentage >= pass_percentage else "FAIL",
-    }
+        parsed = json.loads(data)
+        return parsed
+    except Exception:
+        return {"raw_data": data}
 
 
-def validate_question_paper(
-    text: str,
-    expected_total: int,
-    expected_mcqs: int,
-    expected_short: int,
-    expected_long: int,
-) -> dict:
-    """Basic non-LLM validation. It reports warnings rather than silently changing content."""
-    warnings = []
-    upper = text.upper()
+def record_attendance(qr_data: dict, log_file: str = "attendance_log.csv") -> tuple[str, pd.DataFrame]:
+    """
+    Appends a verified attendance scan with a live timestamp to the attendance CSV.
+    """
+    if "error" in qr_data:
+        return qr_data["error"], pd.DataFrame()
 
-    for section in ["SECTION A", "SECTION B", "SECTION C"]:
-        if section not in upper:
-            warnings.append(f"{section} was not clearly found in the generated output.")
+    roll_no = qr_data.get("roll_no") or qr_data.get("raw_data")
+    name = qr_data.get("name", "N/A")
+    cls_name = qr_data.get("class", "N/A")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-    # Count question labels approximately.
-    mcq_area = upper.split("SECTION B")[0] if "SECTION B" in upper else upper
-    short_area = (
-        upper.split("SECTION B")[1].split("SECTION C")[0]
-        if "SECTION B" in upper and "SECTION C" in upper
-        else ""
-    )
-    long_area = upper.split("SECTION C")[1] if "SECTION C" in upper else ""
+    cols = ["Date", "Timestamp", "Roll Number", "Student Name", "Class", "Status"]
+    if os.path.exists(log_file):
+        df = pd.read_csv(log_file)
+    else:
+        df = pd.DataFrame(columns=cols)
 
-    mcq_found = len(re.findall(r"\bQ?\d+[\.\)]", mcq_area))
-    short_found = len(re.findall(r"\bQ?\d+[\.\)]", short_area))
-    long_found = len(re.findall(r"\bQ?\d+[\.\)]", long_area))
+    # Check if student already marked present today
+    if not df.empty and "Date" in df.columns and "Roll Number" in df.columns:
+        already_present = df[(df["Date"] == date_str) & (df["Roll Number"].astype(str) == str(roll_no))]
+        if not already_present.empty:
+            return f"⚠️ Student {name} (Roll: {roll_no}) is ALREADY marked present today!", df
 
-    if mcq_found < expected_mcqs:
-        warnings.append(f"MCQ count may be low: found about {mcq_found}, expected {expected_mcqs}.")
-    if short_found < expected_short:
-        warnings.append(f"Short-question count may be low: found about {short_found}, expected {expected_short}.")
-    if long_found < expected_long:
-        warnings.append(f"Long-question count may be low: found about {long_found}, expected {expected_long}.")
+    new_entry = pd.DataFrame([{
+        "Date": date_str,
+        "Timestamp": now_str,
+        "Roll Number": roll_no,
+        "Student Name": name,
+        "Class": cls_name,
+        "Status": "Present"
+    }])
+    df = pd.concat([df, new_entry], ignore_index=True)
+    df.to_csv(log_file, index=False)
 
-    return {"warnings": warnings}
-
-
-def make_question_paper_text(metadata: dict, paper: str) -> str:
-    """Convenience helper for other callers."""
-    return (
-        f"{metadata.get('school', '')}\n"
-        f"{metadata.get('exam_type', '')}\n"
-        f"Class: {metadata.get('class', '')}\n"
-        f"Subject: {metadata.get('subject', '')}\n"
-        f"Total Marks: {metadata.get('total_marks', '')}\n\n"
-        f"{paper}"
-    )
+    return f"✅ Attendance Marked: {name} (Roll: {roll_no}) at {now_str}", df
 
 
-def dataframe_to_csv(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8")
-
-
-def build_certificate_pdf(
-    school_name: str,
-    exam_type: str,
-    academic_year: str,
-    student: dict,
-    father_name: str = "",
-    section: str = "",
-    teacher_name: str = "",
-) -> bytes:
-    """Generate an A4 detailed marks certificate."""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=18 * mm,
-        leftMargin=18 * mm,
-        topMargin=18 * mm,
-        bottomMargin=18 * mm,
-    )
-
+# -------------------------------------------------------------
+# PDF Exporters
+# -------------------------------------------------------------
+def generate_pdf_report(title: str, body_text: str, output_path: str) -> str:
+    doc = SimpleDocTemplate(output_path, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
-    center_title = ParagraphStyle(
-        "CertificateTitle",
-        parent=styles["Title"],
-        alignment=TA_CENTER,
-        fontSize=17,
-        leading=22,
-    )
-    center = ParagraphStyle(
-        "CertificateCenter",
-        parent=styles["Normal"],
-        alignment=TA_CENTER,
-    )
+    title_style = ParagraphStyle("DocTitle", parent=styles["Heading1"], fontSize=16, leading=20, alignment=1, spaceAfter=15)
+    body_style = ParagraphStyle("DocBody", parent=styles["Normal"], fontSize=10, leading=14, spaceAfter=8)
 
-    story = [
-        Paragraph(school_name or "SCHOOL", center_title),
-        Paragraph(exam_type or "Examination", center),
-        Paragraph(f"Academic Year: {academic_year}", center),
-        Spacer(1, 10),
-        Paragraph("DETAILED MARKS CERTIFICATE", center_title),
-        Spacer(1, 12),
-        Paragraph(
-            f"<b>Student Name:</b> {student.get('student_name', '')}<br/>"
-            f"<b>Father Name:</b> {father_name}<br/>"
-            f"<b>Roll Number:</b> {student.get('roll_number', '')}<br/>"
-            f"<b>Class:</b> {student.get('class', '')}<br/>"
-            f"<b>Section:</b> {section or student.get('section', '')}",
-            styles["BodyText"],
-        ),
-        Spacer(1, 12),
+    elements = [Paragraph(title, title_style), Spacer(1, 10)]
+    for line in body_text.splitlines():
+        line = line.strip()
+        if not line:
+            elements.append(Spacer(1, 4))
+        else:
+            safe = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            elements.append(Paragraph(safe, body_style))
+
+    doc.build(elements)
+    return output_path
+
+
+def generate_marks_certificate_pdf(student_data: dict, school_info: dict, output_path: str) -> str:
+    doc = SimpleDocTemplate(output_path, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    styles = getSampleStyleSheet()
+    header_style = ParagraphStyle("CertHeader", parent=styles["Heading1"], fontSize=18, leading=22, alignment=1, textColor=colors.HexColor("#1A365D"))
+    subhead_style = ParagraphStyle("CertSubHeader", parent=styles["Heading2"], fontSize=12, leading=16, alignment=1, textColor=colors.HexColor("#4A5568"))
+    normal_style = ParagraphStyle("CertNormal", parent=styles["Normal"], fontSize=10, leading=14)
+
+    elements = [
+        Paragraph(school_info.get("school_name", "ACADEMIC INSTITUTION"), header_style),
+        Paragraph(f"{school_info.get('exam_type', 'EXAMINATION')} — {school_info.get('academic_year', '2025-2026')}", subhead_style),
+        Paragraph("<b>DETAILED MARKS CERTIFICATE</b>", subhead_style),
+        Spacer(1, 15)
     ]
 
-    table_data = [
-        ["Subject", "Subject Code", "Total Marks", "Obtained", "Percentage", "Grade"],
-        [
-            student.get("subject", ""),
-            student.get("subject_code", ""),
-            str(student.get("total_marks", "")),
-            str(student.get("obtained_marks", "")),
-            str(student.get("percentage", "")),
-            student.get("grade", ""),
-        ],
+    demo_data = [
+        [Paragraph(f"<b>Roll No:</b> {student_data.get('roll_number', 'N/A')}", normal_style),
+         Paragraph(f"<b>Student Name:</b> {student_data.get('student_name', 'N/A')}", normal_style)],
+        [Paragraph(f"<b>Class:</b> {school_info.get('class_name', 'N/A')}", normal_style),
+         Paragraph(f"<b>Subject Code:</b> {student_data.get('subject_code', school_info.get('subject_code', 'N/A'))}", normal_style)]
     ]
-    table = Table(table_data, repeatRows=1, colWidths=[45 * mm, 28 * mm, 25 * mm, 25 * mm, 25 * mm, 18 * mm])
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.7, colors.black),
-                ("ALIGN", (2, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("TOPPADDING", (0, 0), (-1, -1), 7),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-            ]
-        )
-    )
-    story.append(table)
-    story.append(Spacer(1, 15))
+    demo_table = Table(demo_data, colWidths=[240, 270])
+    elements.extend([demo_table, Spacer(1, 15)])
 
-    story.append(
-        Paragraph(
-            f"<b>Obtained Marks:</b> {student.get('obtained_marks', '')} / "
-            f"{student.get('total_marks', '')}<br/>"
-            f"<b>Percentage:</b> {student.get('percentage', '')}%<br/>"
-            f"<b>Grade:</b> {student.get('grade', '')}<br/>"
-            f"<b>Result:</b> {student.get('result', '')}",
-            styles["BodyText"],
-        )
-    )
-    story.append(Spacer(1, 30))
-    story.append(
-        Paragraph(
-            f"Class Teacher: {teacher_name or '________________'}"
-            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
-            "Principal: ____________________",
-            styles["BodyText"],
-        )
-    )
+    subj = student_data.get("subject", school_info.get("subject", "General Subject"))
+    obt = str(student_data.get("obtained_marks", 0))
+    tot = str(student_data.get("total_marks", 100))
+    pct = f"{student_data.get('calculated_percentage', 0)}%"
+    grd = student_data.get("calculated_grade", "N/A")
+    res = student_data.get("calculated_status", "N/A")
 
-    doc.build(story)
-    return buffer.getvalue()
+    marks_table_data = [
+        ["Subject", "Subject Code", "Total", "Obtained", "Percentage", "Grade", "Status"],
+        [subj, student_data.get("subject_code", "-"), tot, obt, pct, grd, res]
+    ]
+    marks_table = Table(marks_table_data, colWidths=[130, 75, 55, 60, 70, 55, 65])
+    marks_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EDF2F7")),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 1, colors.HexColor("#CBD5E0")),
+    ]))
+    elements.extend([marks_table, Spacer(1, 40)])
+
+    sig_table = Table([["Date: _____________", "Class Teacher: _____________", "Principal: _____________"]], colWidths=[170, 170, 170])
+    sig_table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
+    elements.append(sig_table)
+
+    doc.build(elements)
+    return output_path
