@@ -1,6 +1,6 @@
 """
 rag.py: Ingestion into Qdrant vector database and querying Google AI Studio's
-gemini-2.5-flash model via the official google-genai SDK.
+gemini-3.6-flash model via the official google-genai SDK.
 """
 
 import os
