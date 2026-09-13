@@ -124,7 +124,7 @@ def query_gemini(prompt: str, system_instruction: str = "You are a professional 
         return "⚠️ Error: GEMINI_API_KEY is not configured. Please add it to your Streamlit Secrets or sidebar."
 
     client = genai.Client(api_key=api_key)
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
     try:
         response = client.models.generate_content(
