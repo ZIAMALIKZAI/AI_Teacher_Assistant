@@ -173,7 +173,8 @@ with tab4:
             out.write(marks_file.getbuffer())
         df_marks = parse_marks_file(m_path)
         st.session_state["marks_df"] = df_marks
-        st.dataframe(df_marks.head(10), use_container_width=True)
+        # Reset index to avoid index-column collision in PyArrow
+st.dataframe(df_marks.head(10).reset_index(drop=True), use_container_width=True)
 
     st.markdown("---")
     st.markdown("##### Search Student Record")
