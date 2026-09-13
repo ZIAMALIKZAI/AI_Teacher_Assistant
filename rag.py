@@ -1,10 +1,11 @@
 """
-rag.py: Document vector ingestion, Qdrant search, and Google AI Studio
-Gemini API queries using the official google-genai SDK (1,000,000 token window).
+rag.py: Ingestion into Qdrant vector database and querying Google AI Studio's
+gemini-2.5-flash model via the official google-genai SDK.
 """
 
 import os
 from dotenv import load_dotenv
+import streamlit as st
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from sentence_transformers import SentenceTransformer
@@ -13,20 +14,27 @@ from utils import extract_text_from_file
 
 load_dotenv()
 
-# Configuration
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Read API Key from Streamlit Secrets or Environment Variables
+def get_api_key():
+    if "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    return os.getenv("GEMINI_API_KEY", "")
+
 QDRANT_LOCATION = os.getenv("QDRANT_LOCATION", ":memory:")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "teacher_knowledge_base")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
-# Vector DB & Embeddings setup
-qdrant = QdrantClient(location=QDRANT_LOCATION)
-embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
-VECTOR_SIZE = embedder.get_sentence_embedding_dimension()
+@st.cache_resource
+def get_qdrant_client():
+    return QdrantClient(location=QDRANT_LOCATION)
 
-# Initialize Google GenAI client
-ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+@st.cache_resource
+def get_embedder():
+    return SentenceTransformer(EMBEDDING_MODEL_NAME)
+
+qdrant = get_qdrant_client()
+embedder = get_embedder()
+VECTOR_SIZE = embedder.get_sentence_embedding_dimension()
 
 
 def ensure_collection():
@@ -88,7 +96,6 @@ def process_and_index_documents(file_paths: list[str]) -> dict:
 
 
 def retrieve_context(query: str, top_k: int = 6) -> tuple[str, list[dict]]:
-    """Retrieves the top k most relevant chunks from Qdrant."""
     ensure_collection()
     query_vector = embedder.encode(query).tolist()
 
@@ -112,48 +119,41 @@ def retrieve_context(query: str, top_k: int = 6) -> tuple[str, list[dict]]:
 
 
 def query_gemini(prompt: str, system_instruction: str = "You are a professional educational AI assistant.") -> str:
-    """Queries Gemini 2.5 Flash with high token limits and zero TPM truncation."""
-    global ai_client
-    api_key = os.getenv("GEMINI_API_KEY", "")
+    api_key = get_api_key()
     if not api_key:
-        return "Error: GEMINI_API_KEY is missing. Add it to .env or in the sidebar."
+        return "⚠️ Error: GEMINI_API_KEY is not configured. Please add it to your Streamlit Secrets or sidebar."
 
-    if not ai_client:
-        ai_client = genai.Client(api_key=api_key)
-
+    client = genai.Client(api_key=api_key)
     model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     try:
-        response = ai_client.models.generate_content(
+        response = client.models.generate_content(
             model=model_name,
             contents=prompt,
             config={"system_instruction": system_instruction, "temperature": 0.2}
         )
         return response.text.strip()
     except Exception as err:
-        return f"Gemini Generation Error: {str(err)}"
+        return f"Gemini Error: {str(err)}"
 
 
-# -------------------------------------------------------------
-# Agentic RAG Task Handlers
-# -------------------------------------------------------------
 def generate_study_notes(topic: str, notes_type: str, language: str) -> str:
-    context, _ = retrieve_context(f"Notes, concepts, definitions, explanations: {topic}", top_k=6)
+    context, _ = retrieve_context(f"Notes, concepts, definitions: {topic}", top_k=6)
     if not context.strip():
         return "Information not found in the uploaded material."
 
     sys_prompt = (
-        "You are an expert school educator. Create study notes strictly using the provided context.\n"
-        "If information is missing, say 'Information not found in the uploaded material.'\n"
-        f"Format in {language} with: Chapter Title, Introduction, Key Definitions, Core Concepts, Examples, Summary Points."
+        "You are an expert school educator. Create structured study notes strictly from the source context.\n"
+        "If the information is not present, respond: 'Information not found in the uploaded material.'\n"
+        f"Language: {language}. Structure: Chapter/Topic Title, Overview, Key Definitions, Core Concepts, Examples, Summary Points."
     )
-    prompt = f"Source Material:\n{context}\n\nTask: Generate {notes_type} for '{topic}' in {language}."
+    prompt = f"Context:\n{context}\n\nTask: Generate {notes_type} for '{topic}' in {language}."
     return query_gemini(prompt, sys_prompt)
 
 
 def generate_exam_paper(criteria: dict) -> tuple[str, str]:
     syllabus = criteria.get("syllabus", "General Syllabus")
-    context, _ = retrieve_context(f"Exam paper questions on: {syllabus}", top_k=8)
+    context, _ = retrieve_context(f"Exam questions for syllabus: {syllabus}", top_k=8)
 
     if not context.strip():
         return "Information not found in the uploaded material.", "Answer key unavailable."
@@ -170,7 +170,7 @@ def generate_exam_paper(criteria: dict) -> tuple[str, str]:
 
     if calc_total != declared_total:
         return (
-            f"Error: Total marks calculated from questions ({calc_total}) does not match specified Total Marks ({declared_total}).",
+            f"Error: Question marks total ({calc_total}) does not match declared Total Marks ({declared_total}).",
             ""
         )
 
@@ -184,17 +184,17 @@ def generate_exam_paper(criteria: dict) -> tuple[str, str]:
 
     paper_prompt = (
         f"SOURCE CONTEXT:\n{context}\n\n"
-        f"Generate a balanced exam paper from the source context:\n"
-        f"- Section A: {mcq_count} MCQs (each {mcq_marks} marks) with 4 choices each (a, b, c, d).\n"
+        f"Generate a formal exam paper:\n"
+        f"- Section A: {mcq_count} MCQs (each {mcq_marks} marks) with 4 options (a, b, c, d).\n"
         f"- Section B: {short_count} Short Questions (each {short_marks} marks).\n"
-        f"- Section C: {long_count} Detailed Questions (each {long_marks} marks).\n"
+        f"- Section C: {long_count} Long Questions (each {long_marks} marks).\n"
         f"- Difficulty: {criteria.get('difficulty', 'Medium')}."
     )
-    paper_body = query_gemini(paper_prompt, "You are a senior academic question paper creator.")
+    paper_body = query_gemini(paper_prompt, "You are a professional examination creator.")
     full_paper = header + paper_body
 
-    key_prompt = f"Source:\n{context}\n\nPaper:\n{paper_body}\n\nProvide the complete Answer Key and grading criteria."
-    answer_key = query_gemini(key_prompt, "You are an examiner preparing official answer keys.")
+    key_prompt = f"Source Context:\n{context}\n\nExam Paper:\n{paper_body}\n\nProvide the official answer key and scoring criteria."
+    answer_key = query_gemini(key_prompt, "You are an examiner providing official answer keys.")
 
     return full_paper, answer_key
 
@@ -204,7 +204,7 @@ def agent_chat_router(user_message: str) -> str:
     if not context.strip():
         return "Information not found in the uploaded material."
 
-    prompt = f"Context:\n{context}\n\nQuestion: {user_message}\n\nProvide an accurate answer based strictly on the uploaded text."
+    prompt = f"Context:\n{context}\n\nUser Question: {user_message}\n\nAnswer accurately based only on the uploaded text."
     res = query_gemini(prompt)
     if sources:
         res += "\n\n**Sources Used:** " + ", ".join([f"{s['source']} (p.{s['page']})" for s in sources[:3]])
