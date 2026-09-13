@@ -65,7 +65,7 @@ def extract_text_from_file(file_path: str) -> list[dict]:
 
 
 def parse_marks_file(file_path: str) -> pd.DataFrame:
-    """Loads and standardizes student marks lists (CSV or Excel)."""
+    """Loads and standardizes student marks lists (CSV or Excel) with duplicate header protection."""
     if not file_path or not os.path.exists(file_path):
         return pd.DataFrame()
 
@@ -83,29 +83,45 @@ def parse_marks_file(file_path: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    cleaned_columns = {}
+    # 1. Clean and normalize column names
+    new_cols = []
     for col in df.columns:
         norm = str(col).strip().lower().replace(" ", "_").replace(".", "")
         if "roll" in norm:
-            cleaned_columns[col] = "roll_number"
+            new_cols.append("roll_number")
         elif "student" in norm or "name" in norm:
-            cleaned_columns[col] = "student_name"
+            new_cols.append("student_name")
         elif "subject_code" in norm or "code" in norm:
-            cleaned_columns[col] = "subject_code"
+            new_cols.append("subject_code")
         elif "subject" in norm:
-            cleaned_columns[col] = "subject"
+            new_cols.append("subject")
         elif "total" in norm:
-            cleaned_columns[col] = "total_marks"
+            new_cols.append("total_marks")
         elif "mark" in norm or "obtained" in norm:
-            cleaned_columns[col] = "obtained_marks"
+            new_cols.append("obtained_marks")
         else:
-            cleaned_columns[col] = norm
+            new_cols.append(norm)
 
-    df = df.rename(columns=cleaned_columns)
+    # 2. De-duplicate identical column names (e.g., 'subject', 'subject_1')
+    seen = {}
+    unique_cols = []
+    for col in new_cols:
+        if col in seen:
+            seen[col] += 1
+            unique_cols.append(f"{col}_{seen[col]}")
+        else:
+            seen[col] = 0
+            unique_cols.append(col)
+
+    df.columns = unique_cols
+
     if "roll_number" in df.columns:
         df["roll_number"] = df["roll_number"].astype(str).str.strip()
-    return df
 
+    # Drop any completely empty unnamed columns if present from Excel
+    df = df.loc[:, ~df.columns.str.startswith("unnamed")]
+
+    return df
 
 def calculate_grade(percentage: float, criteria: dict = None) -> tuple[str, str]:
     if criteria is None:
