@@ -1,332 +1,211 @@
 """
-Simple RAG engine for AI Teacher Assistant.
-
-Pipeline:
-file -> text/OCR -> chunks -> SentenceTransformer embeddings -> Qdrant -> Groq
+rag.py: Document vector ingestion, Qdrant search, and Google AI Studio
+Gemini API queries using the official google-genai SDK (1,000,000 token window).
 """
 
 import os
-import re
-from io import BytesIO
-from typing import Any, Dict, List, Tuple
-
-import fitz  # PyMuPDF
-import numpy as np
-import pytesseract
-from PIL import Image
-from qdrant_client import QdrantClient, models
+from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
 from sentence_transformers import SentenceTransformer
-from groq import Groq
+from google import genai
+from utils import extract_text_from_file
+
+load_dotenv()
+
+# Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+QDRANT_LOCATION = os.getenv("QDRANT_LOCATION", ":memory:")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "teacher_knowledge_base")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
+# Vector DB & Embeddings setup
+qdrant = QdrantClient(location=QDRANT_LOCATION)
+embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
+VECTOR_SIZE = embedder.get_sentence_embedding_dimension()
+
+# Initialize Google GenAI client
+ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
-COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "ai_teacher_documents")
-EMBEDDING_MODEL = os.getenv(
-    "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
-)
-DEFAULT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+def ensure_collection():
+    collections = [c.name for c in qdrant.get_collections().collections]
+    if QDRANT_COLLECTION not in collections:
+        qdrant.create_collection(
+            collection_name=QDRANT_COLLECTION,
+            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+        )
 
 
-def clean_text(text: str) -> str:
-    """Remove excessive whitespace while keeping readable paragraphs."""
-    text = text.replace("\x00", " ")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def split_text(text: str, chunk_size: int = 900, overlap: int = 120) -> List[str]:
-    """Split text into overlapping word-based chunks."""
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 80) -> list[str]:
     words = text.split()
-    if not words:
-        return []
-
     chunks = []
-    start = 0
-    while start < len(words):
-        end = min(start + chunk_size, len(words))
-        chunks.append(" ".join(words[start:end]))
-        if end == len(words):
-            break
-        start = max(end - overlap, start + 1)
+    i = 0
+    while i < len(words):
+        chunk = " ".join(words[i : i + chunk_size])
+        chunks.append(chunk)
+        i += chunk_size - overlap
     return chunks
 
 
-def extract_pdf_text(file_bytes: bytes) -> Tuple[str, int, bool]:
-    """Extract normal PDF text; OCR pages that contain little/no text."""
-    doc = fitz.open(stream=file_bytes, filetype="pdf")
-    pages = []
-    used_ocr = False
+def process_and_index_documents(file_paths: list[str]) -> dict:
+    ensure_collection()
+    total_chunks = 0
+    processed_files = 0
+    points = []
+    point_id = 0
 
-    for page_number, page in enumerate(doc, start=1):
-        text = clean_text(page.get_text("text"))
-        if len(text) >= 40:
-            pages.append(f"[Page {page_number}]\n{text}")
+    for path in file_paths:
+        if not path or not os.path.exists(path):
             continue
+        extracted = extract_text_from_file(path)
+        processed_files += 1
 
-        # Scanned PDF fallback.
-        try:
-            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            ocr_text = clean_text(pytesseract.image_to_string(image))
-            if ocr_text:
-                pages.append(f"[Page {page_number} - OCR]\n{ocr_text}")
-                used_ocr = True
-        except Exception:
-            # Keep processing other pages. The UI reports the overall result.
-            continue
-
-    doc.close()
-    return "\n\n".join(pages), len(pages), used_ocr
-
-
-def extract_image_text(file_bytes: bytes) -> str:
-    """OCR a JPG/PNG image."""
-    image = Image.open(BytesIO(file_bytes)).convert("RGB")
-    return clean_text(pytesseract.image_to_string(image))
-
-
-class RAGEngine:
-    """Small, beginner-friendly RAG implementation."""
-
-    def __init__(self):
-        self.ready = False
-        self.chunk_count = 0
-        self.sources: List[Dict[str, Any]] = []
-        self.model = None
-        self.client = None
-        self.groq = None
-        self.dimension = 384
-
-    def _load_models(self):
-        if self.model is None:
-            self.model = SentenceTransformer(EMBEDDING_MODEL)
-            self.dimension = self.model.get_sentence_embedding_dimension()
-
-        if self.client is None:
-            # In-memory Qdrant is ideal for a simple Streamlit deployment.
-            # Data is rebuilt when the app process restarts.
-            self.client = QdrantClient(":memory:")
-            self.client.create_collection(
-                collection_name=COLLECTION_NAME,
-                vectors_config=models.VectorParams(
-                    size=self.dimension,
-                    distance=models.Distance.COSINE,
-                ),
-            )
-
-        api_key = os.getenv("GROQ_API_KEY", "")
-        if not api_key:
-            raise RuntimeError(
-                "GROQ_API_KEY is missing. Add it to Streamlit Secrets or your .env."
-            )
-        self.groq = Groq(api_key=api_key)
-
-    def process_files(self, uploaded_files) -> Dict[str, Any]:
-        """Read uploaded files and rebuild the current RAG collection."""
-        self._load_models()
-
-        all_chunks = []
-        self.sources = []
-        file_count = 0
-
-        for uploaded in uploaded_files:
-            name = uploaded.name
-            data = uploaded.getvalue()
-            suffix = os.path.splitext(name)[1].lower()
-
-            if suffix == ".pdf":
-                text, page_count, used_ocr = extract_pdf_text(data)
-                source_type = f"PDF ({page_count} pages"
-                if used_ocr:
-                    source_type += ", OCR used"
-                source_type += ")"
-            elif suffix in {".jpg", ".jpeg", ".png"}:
-                text = extract_image_text(data)
-                source_type = "Image (OCR)"
-            else:
-                continue
-
-            text = clean_text(text)
-            if not text:
-                continue
-
-            chunks = split_text(text)
-            for index, chunk in enumerate(chunks, start=1):
-                all_chunks.append(
-                    {
-                        "text": chunk,
-                        "file": name,
-                        "chunk": index,
-                        "source_type": source_type,
-                    }
+        for item in extracted:
+            chunks = chunk_text(item["text"])
+            for c in chunks:
+                vector = embedder.encode(c).tolist()
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector=vector,
+                        payload={"text": c, "source": item["source"], "page": item["page"]}
+                    )
                 )
+                point_id += 1
+                total_chunks += 1
 
-            self.sources.append(
-                {
-                    "file": name,
-                    "type": source_type,
-                    "chunks": len(chunks),
-                    "characters": len(text),
-                }
-            )
-            file_count += 1
-
-        if not all_chunks:
-            raise ValueError("No readable text was found in the uploaded files.")
-
-        vectors = self.model.encode(
-            [item["text"] for item in all_chunks],
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
-
-        points = []
-        for idx, (item, vector) in enumerate(zip(all_chunks, vectors)):
-            points.append(
-                models.PointStruct(
-                    id=idx,
-                    vector=np.asarray(vector, dtype=np.float32).tolist(),
-                    payload=item,
-                )
+    if points:
+        batch_size = 64
+        for idx in range(0, len(points), batch_size):
+            qdrant.upsert(
+                collection_name=QDRANT_COLLECTION,
+                points=points[idx : idx + batch_size]
             )
 
-        self.client.upsert(collection_name=COLLECTION_NAME, points=points)
-        self.chunk_count = len(points)
-        self.ready = True
+    return {"processed_files": processed_files, "total_chunks": total_chunks}
 
-        return {
-            "files_processed": file_count,
-            "chunks": self.chunk_count,
-            "rag_database": "Qdrant in-memory collection",
-            "ocr_supported": True,
-        }
 
-    def search(self, query: str, top_k: int = 6):
-        if not self.ready:
-            return []
+def retrieve_context(query: str, top_k: int = 6) -> tuple[str, list[dict]]:
+    """Retrieves the top k most relevant chunks from Qdrant."""
+    ensure_collection()
+    query_vector = embedder.encode(query).tolist()
 
-        vector = self.model.encode(
-            query,
-            normalize_embeddings=True,
-            show_progress_bar=False,
+    search_result = qdrant.query_points(
+        collection_name=QDRANT_COLLECTION,
+        query=query_vector,
+        limit=top_k
+    ).points
+
+    if not search_result:
+        return "", []
+
+    context_blocks = []
+    sources = []
+    for point in search_result:
+        text = point.payload.get("text", "")
+        context_blocks.append(text)
+        sources.append({"source": point.payload.get("source", "Doc"), "page": point.payload.get("page", 1)})
+
+    return "\n\n---\n\n".join(context_blocks), sources
+
+
+def query_gemini(prompt: str, system_instruction: str = "You are a professional educational AI assistant.") -> str:
+    """Queries Gemini 2.5 Flash with high token limits and zero TPM truncation."""
+    global ai_client
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return "Error: GEMINI_API_KEY is missing. Add it to .env or in the sidebar."
+
+    if not ai_client:
+        ai_client = genai.Client(api_key=api_key)
+
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+    try:
+        response = ai_client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config={"system_instruction": system_instruction, "temperature": 0.2}
         )
-        results = self.client.query_points(
-            collection_name=COLLECTION_NAME,
-            query=np.asarray(vector, dtype=np.float32).tolist(),
-            limit=top_k,
-            with_payload=True,
-        ).points
+        return response.text.strip()
+    except Exception as err:
+        return f"Gemini Generation Error: {str(err)}"
 
-        return results
 
-    def _groq_generate(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        max_tokens: int = 4000,
-    ) -> str:
-        if not self.groq:
-            raise RuntimeError("Groq is not initialized.")
+# -------------------------------------------------------------
+# Agentic RAG Task Handlers
+# -------------------------------------------------------------
+def generate_study_notes(topic: str, notes_type: str, language: str) -> str:
+    context, _ = retrieve_context(f"Notes, concepts, definitions, explanations: {topic}", top_k=6)
+    if not context.strip():
+        return "Information not found in the uploaded material."
 
-        response = self.groq.chat.completions.create(
-            model=os.getenv("GROQ_MODEL", DEFAULT_MODEL),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.2,
-            max_tokens=max_tokens,
+    sys_prompt = (
+        "You are an expert school educator. Create study notes strictly using the provided context.\n"
+        "If information is missing, say 'Information not found in the uploaded material.'\n"
+        f"Format in {language} with: Chapter Title, Introduction, Key Definitions, Core Concepts, Examples, Summary Points."
+    )
+    prompt = f"Source Material:\n{context}\n\nTask: Generate {notes_type} for '{topic}' in {language}."
+    return query_gemini(prompt, sys_prompt)
+
+
+def generate_exam_paper(criteria: dict) -> tuple[str, str]:
+    syllabus = criteria.get("syllabus", "General Syllabus")
+    context, _ = retrieve_context(f"Exam paper questions on: {syllabus}", top_k=8)
+
+    if not context.strip():
+        return "Information not found in the uploaded material.", "Answer key unavailable."
+
+    mcq_count = criteria.get("mcq_count", 0)
+    mcq_marks = criteria.get("mcq_marks", 1)
+    short_count = criteria.get("short_count", 0)
+    short_marks = criteria.get("short_marks", 2)
+    long_count = criteria.get("long_count", 0)
+    long_marks = criteria.get("long_marks", 5)
+
+    calc_total = (mcq_count * mcq_marks) + (short_count * short_marks) + (long_count * long_marks)
+    declared_total = criteria.get("total_marks", calc_total)
+
+    if calc_total != declared_total:
+        return (
+            f"Error: Total marks calculated from questions ({calc_total}) does not match specified Total Marks ({declared_total}).",
+            ""
         )
-        content = response.choices[0].message.content
-        if not content:
-            raise RuntimeError("Groq returned an empty response.")
-        return content.strip()
 
-    def answer(
-        self,
-        request: str,
-        top_k: int = 6,
-        max_tokens: int = 4000,
-    ) -> Tuple[str, List[str]]:
-        """Retrieve source chunks and ask Groq to answer only from them."""
-        if not self.ready:
-            raise RuntimeError("No documents have been processed.")
+    header = (
+        f"{criteria.get('school_name', 'HIGH SCHOOL')}\n"
+        f"{criteria.get('exam_type', 'EXAMINATION')}\n"
+        f"Class: {criteria.get('class_name', '')} | Subject: {criteria.get('subject', '')} ({criteria.get('subject_code', '')})\n"
+        f"Time Allowed: {criteria.get('exam_time', '2 Hours')} | Total Marks: {declared_total}\n"
+        f"{'='*60}\n\n"
+    )
 
-        results = self.search(request, top_k=top_k)
-        if not results:
-            return "Information not found in the uploaded material.", []
+    paper_prompt = (
+        f"SOURCE CONTEXT:\n{context}\n\n"
+        f"Generate a balanced exam paper from the source context:\n"
+        f"- Section A: {mcq_count} MCQs (each {mcq_marks} marks) with 4 choices each (a, b, c, d).\n"
+        f"- Section B: {short_count} Short Questions (each {short_marks} marks).\n"
+        f"- Section C: {long_count} Detailed Questions (each {long_marks} marks).\n"
+        f"- Difficulty: {criteria.get('difficulty', 'Medium')}."
+    )
+    paper_body = query_gemini(paper_prompt, "You are a senior academic question paper creator.")
+    full_paper = header + paper_body
 
-        context_parts = []
-        source_labels = []
-        for result in results:
-            payload = result.payload or {}
-            context_parts.append(
-                f"FILE: {payload.get('file', 'Unknown')}\n"
-                f"CHUNK: {payload.get('chunk', '?')}\n"
-                f"CONTENT:\n{payload.get('text', '')}"
-            )
-            source_labels.append(
-                f"{payload.get('file', 'Unknown')} / chunk {payload.get('chunk', '?')}"
-            )
+    key_prompt = f"Source:\n{context}\n\nPaper:\n{paper_body}\n\nProvide the complete Answer Key and grading criteria."
+    answer_key = query_gemini(key_prompt, "You are an examiner preparing official answer keys.")
 
-        context = "\n\n--- SOURCE CHUNK ---\n\n".join(context_parts)
+    return full_paper, answer_key
 
-        system = """You are AI Teacher Assistant.
-Use the supplied uploaded-document context as the PRIMARY and AUTHORITATIVE source.
-Do not invent facts, chapters, marks, questions, names or syllabus content.
-If the requested information is not supported by the context, reply exactly:
-Information not found in the uploaded material.
 
-For question generation, create questions only from supported source content.
-For educational output, be clear, structured and teacher-friendly."""
-        user = f"""Teacher request:
-{request}
+def agent_chat_router(user_message: str) -> str:
+    context, sources = retrieve_context(user_message, top_k=5)
+    if not context.strip():
+        return "Information not found in the uploaded material."
 
-Uploaded-document context:
-{context}
-"""
-        return self._groq_generate(system, user, max_tokens), source_labels
-
-    def detect_intent(self, request: str) -> str:
-        """Predictable keyword router: this is the small agentic layer."""
-        text = request.lower()
-
-        if any(x in text for x in ["marks", "roll no", "roll number", "award list"]):
-            return "marks_lookup"
-        if any(x in text for x in ["certificate", "result card", "marks certificate"]):
-            return "certificate"
-        if "question paper" in text or "exam paper" in text:
-            return "question_paper"
-        if "answer key" in text:
-            return "answer_key"
-        if any(x in text for x in ["mcq", "multiple choice"]):
-            return "mcqs"
-        if "short question" in text:
-            return "short_questions"
-        if "long question" in text:
-            return "long_questions"
-        if any(x in text for x in ["notes", "study notes", "exam notes"]):
-            return "notes"
-        return "general_qa"
-
-    def agent_answer(self, request: str) -> Tuple[str, List[str]]:
-        """Route the request, then use RAG for the actual educational answer."""
-        intent = self.detect_intent(request)
-
-        instruction_map = {
-            "notes": "Generate structured study notes from the uploaded material.",
-            "mcqs": "Generate MCQs from the uploaded material. Include four options and the correct answer.",
-            "short_questions": "Generate short-answer questions from the uploaded material.",
-            "long_questions": "Generate long-answer questions from the uploaded material.",
-            "question_paper": "Generate an examination paper from the uploaded material.",
-            "answer_key": "Generate an answer key from the uploaded material.",
-            "marks_lookup": "The user is asking about marks. Explain that marks lookup is performed in the Marks tab.",
-            "certificate": "The user is asking for a certificate. Explain that certificate generation is performed in the Detailed Certificate tab.",
-            "general_qa": "Answer the teacher's question from the uploaded material.",
-        }
-        request_with_intent = (
-            f"Detected task: {intent}\n"
-            f"{instruction_map[intent]}\n\n"
-            f"Teacher request: {request}"
-        )
-        return self.answer(request_with_intent)
+    prompt = f"Context:\n{context}\n\nQuestion: {user_message}\n\nProvide an accurate answer based strictly on the uploaded text."
+    res = query_gemini(prompt)
+    if sources:
+        res += "\n\n**Sources Used:** " + ", ".join([f"{s['source']} (p.{s['page']})" for s in sources[:3]])
+    return res
