@@ -1,426 +1,240 @@
 """
-AI Teacher Assistant
-Streamlit entry point.
-
-Run locally:
-    streamlit run app.py
+app.py: Gradio user interface for AI Teacher Assistant with QR Code Student
+Attendance, document RAG, automated exam generation, and marks certification.
 """
 
 import os
-from io import BytesIO
-
+import gradio as gr
 import pandas as pd
-import streamlit as st
-
-from rag import RAGEngine
+from rag import (
+    process_and_index_documents,
+    generate_study_notes,
+    generate_exam_paper,
+    agent_chat_router
+)
 from utils import (
-    build_certificate_pdf,
-    build_question_paper_pdf,
-    build_text_pdf,
-    calculate_result,
-    dataframe_to_csv,
-    detect_columns,
-    extract_marks_file,
-    make_question_paper_text,
-    validate_question_paper,
+    parse_marks_file,
+    lookup_student_record,
+    generate_pdf_report,
+    generate_marks_certificate_pdf,
+    generate_student_qr_card,
+    decode_qr_image,
+    record_attendance
 )
 
-st.set_page_config(
-    page_title="AI Teacher Assistant",
-    page_icon="📚",
-    layout="wide",
-)
+TEMP_DIR = "temp_output"
+os.makedirs(TEMP_DIR, exist_ok=True)
 
-# ---------- Session state ----------
-
-if "rag" not in st.session_state:
-    st.session_state.rag = RAGEngine()
-if "marks_df" not in st.session_state:
-    st.session_state.marks_df = None
-if "paper" not in st.session_state:
-    st.session_state.paper = None
-if "answer_key" not in st.session_state:
-    st.session_state.answer_key = None
-if "notes" not in st.session_state:
-    st.session_state.notes = ""
-if "chat" not in st.session_state:
-    st.session_state.chat = []
+uploaded_marks_df = pd.DataFrame()
 
 
-def secret_or_env(name: str, default: str = "") -> str:
-    """Read a Streamlit secret first, then an environment variable."""
-    try:
-        if name in st.secrets:
-            return str(st.secrets[name])
-    except Exception:
-        pass
-    return os.getenv(name, default)
+# --- Handlers ---
+def handle_doc_upload(files):
+    if not files:
+        return "No files uploaded."
+    res = process_and_index_documents([f.name for f in files])
+    return f"Indexed {res['processed_files']} file(s) into Qdrant ({res['total_chunks']} chunks created)."
 
 
-# ---------- Sidebar ----------
+def handle_notes_gen(topic, notes_type, language):
+    if not topic.strip():
+        return "Please specify a topic.", None
+    notes = generate_study_notes(topic, notes_type, language)
+    pdf_path = os.path.join(TEMP_DIR, "Study_Notes.pdf")
+    generate_pdf_report("STUDY NOTES", notes, pdf_path)
+    return notes, pdf_path
 
-st.sidebar.title("📚 AI Teacher Assistant")
-school = st.sidebar.text_input("School Name", "My School")
-teacher = st.sidebar.text_input("Teacher Name", "")
-class_name = st.sidebar.text_input("Class", "")
-subject = st.sidebar.text_input("Subject", "")
-subject_code = st.sidebar.text_input("Subject Code", "")
-exam_type = st.sidebar.text_input("Examination Type", "Annual Examination")
-academic_year = st.sidebar.text_input("Academic Year", "2026")
-total_marks = st.sidebar.number_input("Total Marks", min_value=1, value=100)
-exam_time = st.sidebar.text_input("Exam Time", "2 Hours")
 
-st.sidebar.divider()
-st.sidebar.caption(
-    "RAG status: "
-    + ("Ready" if st.session_state.rag.ready else "No documents processed")
-)
+def handle_paper_gen(school, exam_type, cls_name, subj, code, time_lim, total_marks,
+                     mcq_count, mcq_mk, short_count, short_mk, long_count, long_mk,
+                     syllabus, diff):
+    criteria = {
+        "school_name": school, "exam_type": exam_type, "class_name": cls_name,
+        "subject": subj, "subject_code": code, "exam_time": time_lim,
+        "total_marks": int(total_marks), "mcq_count": int(mcq_count),
+        "mcq_marks": int(mcq_mk), "short_count": int(short_count),
+        "short_marks": int(short_mk), "long_count": int(long_count),
+        "long_marks": int(long_mk), "syllabus": syllabus, "difficulty": diff
+    }
+    paper, ans_key = generate_exam_paper(criteria)
+    if "Error:" in paper or "Information not found" in paper:
+        return paper, ans_key, None, None
 
-# ---------- Header ----------
+    p_path = os.path.join(TEMP_DIR, "Question_Paper.pdf")
+    k_path = os.path.join(TEMP_DIR, "Answer_Key.pdf")
+    generate_pdf_report("EXAMINATION QUESTION PAPER", paper, p_path)
+    generate_pdf_report("OFFICIAL ANSWER KEY", ans_key, k_path)
+    return paper, ans_key, p_path, k_path
 
-st.title("📚 AI Teacher Assistant")
-st.caption(
-    "Upload teaching material, retrieve it with RAG, and generate "
-    "teacher-ready notes, papers, answer keys and marks certificates."
-)
 
-# ---------- Tabs ----------
+def handle_marks_upload(file):
+    global uploaded_marks_df
+    if not file:
+        return "No file selected.", None
+    uploaded_marks_df = parse_marks_file(file.name)
+    if uploaded_marks_df.empty:
+        return "Failed to parse records.", None
+    return f"Loaded {len(uploaded_marks_df)} students successfully.", uploaded_marks_df.head(10)
 
-tab_upload, tab_notes, tab_paper, tab_marks, tab_cert, tab_chat = st.tabs(
-    [
-        "📄 Upload Material",
-        "📚 Notes",
-        "📝 Question Paper",
-        "📊 Marks / Award List",
-        "🎓 Detailed Certificate",
-        "🤖 AI Assistant",
-    ]
-)
 
-with tab_upload:
-    st.subheader("Upload Educational Material")
-    uploads = st.file_uploader(
-        "PDF, JPG, JPEG or PNG",
-        type=["pdf", "jpg", "jpeg", "png"],
-        accept_multiple_files=True,
+def handle_student_lookup(roll_no, subject_query, school, exam_type, academic_year, cls_name):
+    global uploaded_marks_df
+    if uploaded_marks_df.empty:
+        return "Please upload an award list first.", None
+
+    res = lookup_student_record(uploaded_marks_df, roll_no, subject_query)
+    if "error" in res:
+        return res["error"], None
+
+    report = (
+        f"Roll Number: {res.get('roll_number')}\n"
+        f"Student Name: {res.get('student_name', 'N/A')}\n"
+        f"Subject: {res.get('subject', subject_query)}\n"
+        f"Obtained Marks: {res.get('obtained_marks')}/{res.get('total_marks', 100)}\n"
+        f"Percentage: {res.get('calculated_percentage')}%\n"
+        f"Grade: {res.get('calculated_grade')}\n"
+        f"Result: {res.get('calculated_status')}"
     )
+    school_info = {
+        "school_name": school, "exam_type": exam_type,
+        "academic_year": academic_year, "class_name": cls_name,
+        "subject": res.get("subject", subject_query),
+        "subject_code": res.get("subject_code", "")
+    }
+    cert_path = os.path.join(TEMP_DIR, f"Certificate_{roll_no}.pdf")
+    generate_marks_certificate_pdf(res, school_info, cert_path)
+    return report, cert_path
 
-    if uploads:
-        st.write("Selected files:")
-        for f in uploads:
-            st.write(f"• {f.name} ({f.size / 1024:.1f} KB)")
 
-    if st.button("Process Documents", type="primary"):
-        if not uploads:
-            st.error("Please upload at least one educational document.")
-        else:
-            with st.spinner("Extracting, chunking, embedding and indexing..."):
-                try:
-                    result = st.session_state.rag.process_files(uploads)
-                    st.success("Documents processed successfully.")
-                    st.json(result)
-                except Exception as exc:
-                    st.error(f"Document processing failed: {exc}")
+# --- QR Code Handlers ---
+def handle_make_qr(roll_no, name, class_name):
+    if not roll_no.strip():
+        return None, "Please provide a Roll Number."
+    out_file = os.path.join(TEMP_DIR, f"QR_Student_{roll_no.strip()}.png")
+    generate_student_qr_card(roll_no, name, class_name, out_file)
+    return out_file, f"QR Card generated for {name} ({roll_no})."
 
-    if st.session_state.rag.ready:
-        st.success(
-            f"RAG database ready — {st.session_state.rag.chunk_count} chunks indexed."
-        )
-        if st.session_state.rag.sources:
-            st.dataframe(pd.DataFrame(st.session_state.rag.sources), use_container_width=True)
 
-with tab_notes:
-    st.subheader("📚 Notes Generator")
-    c1, c2 = st.columns(2)
-    with c1:
-        note_chapter = st.text_input("Chapter / Topic", key="note_chapter")
-        note_length = st.selectbox(
-            "Notes Type",
-            ["Short Notes", "Detailed Notes", "Exam Notes", "Important Points",
-             "Definitions", "Key Concepts"],
-        )
-    with c2:
-        note_language = st.selectbox("Language", ["English", "Urdu"])
-        note_extra = st.text_area("Optional instruction", "Focus only on the uploaded material.")
+def handle_scan_qr(img_frame):
+    if img_frame is None:
+        return "No image captured or uploaded.", None
+    data = decode_qr_image(img_frame)
+    msg, df = record_attendance(data)
+    log_csv = "attendance_log.csv" if os.path.exists("attendance_log.csv") else None
+    return msg, df.tail(10) if not df.empty else None, log_csv
 
-    if st.button("Generate Notes", type="primary"):
-        if not st.session_state.rag.ready:
-            st.error("Please process educational documents first.")
-        else:
-            with st.spinner("Retrieving source material and generating notes..."):
-                try:
-                    prompt = (
-                        f"Create {note_length.lower()} for {note_chapter or 'the uploaded material'}. "
-                        f"Language: {note_language}. {note_extra}"
-                    )
-                    answer, sources = st.session_state.rag.answer(prompt)
-                    st.session_state.notes = answer
-                    st.markdown(answer)
-                    st.caption("Sources used: " + ", ".join(sources))
-                except Exception as exc:
-                    st.error(str(exc))
 
-    if st.session_state.notes:
-        notes_bytes = st.session_state.notes.encode("utf-8")
-        st.download_button(
-            "Download Notes TXT",
-            notes_bytes,
-            "study_notes.txt",
-            "text/plain",
-        )
-        st.download_button(
-            "Download Notes PDF",
-            build_text_pdf("Study Notes", st.session_state.notes),
-            "study_notes.pdf",
-            "application/pdf",
-        )
+# -------------------------------------------------------------
+# Gradio Interface
+# -------------------------------------------------------------
+with gr.Blocks(title="AI Teacher Assistant") as demo:
+    gr.Markdown("# 🎓 AI Teacher Assistant\n*RAG Prep, Exam Paper Generator, Marks Certificates & QR Attendance.*")
 
-with tab_paper:
-    st.subheader("📝 Question Paper Generator")
+    with gr.Sidebar():
+        gr.Markdown("### 🏫 School & Exam Settings")
+        sb_school = gr.Textbox(label="School Name", value="City Public High School")
+        sb_exam = gr.Textbox(label="Exam Type", value="Annual Examination")
+        sb_year = gr.Textbox(label="Academic Year", value="2025-2026")
+        sb_class = gr.Textbox(label="Class", value="Grade 10")
+        sb_subject = gr.Textbox(label="Subject", value="Computer Science")
+        sb_sub_code = gr.Textbox(label="Subject Code", value="CS-101")
+        gr.Markdown("---")
+        sb_gemini_key = gr.Textbox(label="Gemini API Key (Override)", type="password")
+        def set_gemini_key(k):
+            if k: os.environ["GEMINI_API_KEY"] = k
+        sb_gemini_key.change(set_gemini_key, inputs=[sb_gemini_key])
 
-    st.info("The question counts and marks must add up exactly to Total Marks.")
+    with gr.Tabs():
+        # TAB 1: Upload Documents
+        with gr.TabItem("📁 Upload Material"):
+            doc_files = gr.File(label="Upload Textbooks / Syllabi / Scans", file_count="multiple", file_types=[".pdf", ".png", ".jpg", ".jpeg"])
+            btn_process = gr.Button("⚡ Index into Qdrant", variant="primary")
+            doc_status = gr.Textbox(label="RAG Index Status", interactive=False)
+            btn_process.click(handle_doc_upload, inputs=[doc_files], outputs=[doc_status])
 
-    p1, p2, p3 = st.columns(3)
-    with p1:
-        mcq_n = st.number_input("MCQs", 0, 100, 20)
-        mcq_marks = st.number_input("Marks / MCQ", 1, 20, 1)
-    with p2:
-        short_n = st.number_input("Short Questions", 0, 100, 10)
-        short_marks = st.number_input("Marks / Short", 1, 50, 3)
-    with p3:
-        long_n = st.number_input("Long Questions", 0, 50, 5)
-        long_marks = st.number_input("Marks / Long", 1, 100, 10)
+        # TAB 2: Notes Generator
+        with gr.TabItem("📚 Notes Generator"):
+            with gr.Row():
+                note_topic = gr.Textbox(label="Topic / Chapter", placeholder="e.g., Chapter 4: Database Systems")
+                note_type = gr.Dropdown(["Detailed Notes", "Short Notes", "Exam Notes", "Key Concepts"], label="Type", value="Detailed Notes")
+                note_lang = gr.Radio(["English", "Urdu"], label="Language", value="English")
+            btn_gen_notes = gr.Button("Generate Notes", variant="primary")
+            notes_out = gr.Markdown()
+            notes_pdf = gr.File(label="Download Notes (PDF)")
+            btn_gen_notes.click(handle_notes_gen, inputs=[note_topic, note_type, note_lang], outputs=[notes_out, notes_pdf])
 
-    q1, q2 = st.columns(2)
-    with q1:
-        chapters = st.text_input(
-            "Selected syllabus / chapters",
-            placeholder="Chapter 1, Chapter 2, Chapter 3",
-        )
-    with q2:
-        difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Difficult", "Mixed"])
+        # TAB 3: Question Paper Generator
+        with gr.TabItem("📝 Question Paper"):
+            with gr.Row():
+                paper_syllabus = gr.Textbox(label="Syllabus Scope", value="All Uploaded Chapters", scale=2)
+                paper_diff = gr.Dropdown(["Easy", "Medium", "Difficult", "Mixed"], label="Difficulty", value="Medium")
+                paper_time = gr.Textbox(label="Time Allowed", value="2 Hours")
+                paper_total = gr.Number(label="Total Marks", value=100)
+            with gr.Row():
+                mcq_n = gr.Number(label="No. of MCQs", value=20)
+                mcq_m = gr.Number(label="Marks / MCQ", value=1)
+                short_n = gr.Number(label="No. of Short Qs", value=10)
+                short_m = gr.Number(label="Marks / Short Q", value=3)
+                long_n = gr.Number(label="No. of Long Qs", value=5)
+                long_m = gr.Number(label="Marks / Long Q", value=10)
 
-    cognitive = st.multiselect(
-        "Cognitive focus",
-        ["Knowledge", "Understanding", "Application"],
-        default=["Knowledge", "Understanding"],
-    )
+            btn_gen_paper = gr.Button("Generate Paper & Answer Key", variant="primary")
+            with gr.Row():
+                paper_out = gr.Textbox(label="Question Paper", lines=14)
+                key_out = gr.Textbox(label="Answer Key", lines=14)
+            with gr.Row():
+                paper_pdf = gr.File(label="Download Question Paper (PDF)")
+                key_pdf = gr.File(label="Download Answer Key (PDF)")
 
-    calculated = (
-        mcq_n * mcq_marks
-        + short_n * short_marks
-        + long_n * long_marks
-    )
-    st.metric("Calculated Marks", calculated)
+            btn_gen_paper.click(
+                handle_paper_gen,
+                inputs=[sb_school, sb_exam, sb_class, sb_subject, sb_sub_code, paper_time, paper_total,
+                        mcq_n, mcq_m, short_n, short_m, long_n, long_m, paper_syllabus, paper_diff],
+                outputs=[paper_out, key_out, paper_pdf, key_pdf]
+            )
 
-    if calculated != total_marks:
-        st.warning(
-            f"Criteria total {calculated}, but Total Marks is {total_marks}. "
-            "Correct the values before generating."
-        )
+        # TAB 4: Marks List & Certificates
+        with gr.TabItem("📊 Marks & Certificates"):
+            marks_file = gr.File(label="Award List (.xlsx, .csv)", file_types=[".xlsx", ".xls", ".csv"])
+            marks_status = gr.Textbox(label="Upload Status", interactive=False)
+            marks_preview = gr.DataFrame(label="Uploaded Preview")
+            marks_file.change(handle_marks_upload, inputs=[marks_file], outputs=[marks_status, marks_preview])
 
-    if st.button("Generate Question Paper", type="primary"):
-        if calculated != total_marks:
-            st.error("Question-paper criteria do not equal the specified Total Marks.")
-        elif not st.session_state.rag.ready:
-            st.error("Please process educational documents first.")
-        else:
-            with st.spinner("Generating and validating the paper..."):
-                try:
-                    paper_prompt = f"""
-Create a complete examination paper from ONLY the retrieved uploaded material.
+            with gr.Row():
+                srch_roll = gr.Textbox(label="Roll Number")
+                srch_sub = gr.Textbox(label="Subject Filter")
+            btn_srch = gr.Button("Search & Generate Certificate", variant="primary")
+            with gr.Row():
+                srch_res = gr.Textbox(label="Student Record", lines=5)
+                cert_pdf = gr.File(label="Download Certificate (PDF)")
+            btn_srch.click(handle_student_lookup, inputs=[srch_roll, srch_sub, sb_school, sb_exam, sb_year, sb_class], outputs=[srch_res, cert_pdf])
 
-School: {school}
-Class: {class_name}
-Subject: {subject}
-Subject Code: {subject_code}
-Exam: {exam_type}
-Academic Year: {academic_year}
-Time: {exam_time}
-Total Marks: {total_marks}
+        # TAB 5: QR Code Attendance System
+        with gr.TabItem("📷 QR Code Attendance"):
+            gr.Markdown("### Student Attendance Management via QR Code")
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("#### 1. Generate Student QR ID Card")
+                    qr_roll = gr.Textbox(label="Roll Number", placeholder="e.g. 101")
+                    qr_name = gr.Textbox(label="Student Name", placeholder="e.g. Ahmad Ali")
+                    qr_cls = gr.Textbox(label="Class", placeholder="e.g. Grade 10")
+                    btn_make_qr = gr.Button("Create QR Card", variant="primary")
+                    qr_img_out = gr.Image(label="Generated QR ID Card", type="filepath")
+                    qr_msg = gr.Textbox(label="Status", interactive=False)
+                    btn_make_qr.click(handle_make_qr, inputs=[qr_roll, qr_name, qr_cls], outputs=[qr_img_out, qr_msg])
 
-Selected syllabus/chapters: {chapters or "all uploaded material"}
-Difficulty: {difficulty}
-Cognitive focus: {", ".join(cognitive) or "Mixed"}
+                with gr.Column():
+                    gr.Markdown("#### 2. Scan QR Code (Live Camera or Image)")
+                    cam_input = gr.Image(label="Capture or Upload QR Code", sources=["webcam", "upload"], type="numpy")
+                    btn_scan = gr.Button("Mark Attendance", variant="secondary")
+                    scan_status = gr.Textbox(label="Scan Result", interactive=False)
+                    recent_attendance = gr.DataFrame(label="Recent Scans")
+                    download_log = gr.File(label="Download Attendance Log (.csv)")
+                    btn_scan.click(handle_scan_qr, inputs=[cam_input], outputs=[scan_status, recent_attendance, download_log])
 
-Required:
-MCQs: {mcq_n} x {mcq_marks}
-Short questions: {short_n} x {short_marks}
-Long questions: {long_n} x {long_marks}
+        # TAB 6: AI Chat Assistant
+        with gr.TabItem("🤖 AI Assistant"):
+            gr.ChatInterface(fn=lambda msg, hist: agent_chat_router(msg))
 
-Rules:
-- Every question must be supported by the uploaded material.
-- Do not use outside syllabus content.
-- Do not repeat questions.
-- MCQs need four meaningful options and one clearly correct answer.
-- Return two parts:
-PART A: QUESTION PAPER
-PART B: ANSWER KEY
-"""
-                    answer, sources = st.session_state.rag.answer(
-                        paper_prompt,
-                        top_k=10,
-                        max_tokens=7000,
-                    )
-                    # Basic structural validation in addition to the AI's own validation.
-                    validation = validate_question_paper(
-                        answer,
-                        expected_total=total_marks,
-                        expected_mcqs=mcq_n,
-                        expected_short=short_n,
-                        expected_long=long_n,
-                    )
-                    st.session_state.paper = answer
-                    st.session_state.answer_key = answer
-                    st.markdown(answer)
-                    st.caption("Sources used: " + ", ".join(sources))
-                    if validation["warnings"]:
-                        for warning in validation["warnings"]:
-                            st.warning(warning)
-                except Exception as exc:
-                    st.error(str(exc))
-
-    if st.session_state.paper:
-        paper_text = st.session_state.paper
-        st.download_button(
-            "Download Question Paper PDF",
-            build_question_paper_pdf(
-                school, exam_type, class_name, subject, subject_code,
-                exam_time, total_marks, paper_text
-            ),
-            "question_paper.pdf",
-            "application/pdf",
-        )
-        st.download_button(
-            "Download Answer / Output TXT",
-            paper_text.encode("utf-8"),
-            "question_paper_and_answer_key.txt",
-            "text/plain",
-        )
-
-with tab_marks:
-    st.subheader("📊 Marks / Award List")
-    marks_file = st.file_uploader(
-        "Upload Excel, CSV, PDF or image",
-        type=["xlsx", "xls", "csv", "pdf", "jpg", "jpeg", "png"],
-        key="marks_upload",
-    )
-
-    if st.button("Read Award List"):
-        if not marks_file:
-            st.error("Please upload a marks/award list.")
-        else:
-            try:
-                with st.spinner("Reading marks list..."):
-                    df = extract_marks_file(marks_file)
-                    st.session_state.marks_df = df
-                st.success(f"Loaded {len(df)} records.")
-            except Exception as exc:
-                st.error(f"Could not read marks list: {exc}")
-
-    df = st.session_state.marks_df
-    if df is not None:
-        st.dataframe(df, use_container_width=True)
-        st.download_button(
-            "Download Marks CSV",
-            dataframe_to_csv(df),
-            "marks_processed.csv",
-            "text/csv",
-        )
-
-        detected = detect_columns(df)
-        st.write("Detected columns:", detected)
-
-        st.subheader("Find Student Marks")
-        roll = st.text_input("Roll Number", key="lookup_roll")
-        lookup_subject = st.text_input(
-            "Subject or Subject Code",
-            value=subject,
-            key="lookup_subject",
-        )
-        lookup_total = st.number_input(
-            "Subject Total Marks",
-            min_value=1,
-            value=int(total_marks),
-            key="lookup_total",
-        )
-
-        if st.button("Find Marks"):
-            try:
-                result = calculate_result(
-                    df, roll, lookup_subject, lookup_total
-                )
-                if result is None:
-                    st.error("Student/Roll Number not found.")
-                else:
-                    st.session_state.lookup_result = result
-                    st.json(result)
-            except Exception as exc:
-                st.error(str(exc))
-
-with tab_cert:
-    st.subheader("🎓 Detailed Marks Certificate")
-
-    result = st.session_state.get("lookup_result")
-    if result:
-        st.write("Current student result:")
-        st.json(result)
-
-        father_name = st.text_input("Father Name (optional)")
-        section = st.text_input("Section (optional)")
-        if st.button("Generate Certificate PDF", type="primary"):
-            try:
-                pdf = build_certificate_pdf(
-                    school_name=school,
-                    exam_type=exam_type,
-                    academic_year=academic_year,
-                    student=result,
-                    father_name=father_name,
-                    section=section,
-                    teacher_name=teacher,
-                )
-                st.download_button(
-                    "Download A4 Certificate PDF",
-                    pdf,
-                    f"certificate_{result['roll_number']}.pdf",
-                    "application/pdf",
-                )
-            except Exception as exc:
-                st.error(str(exc))
-    else:
-        st.info("Find a student in the Marks / Award List tab first.")
-
-with tab_chat:
-    st.subheader("🤖 AI Assistant")
-    st.caption("Ask questions about the uploaded educational material.")
-
-    for message in st.session_state.chat:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            if message.get("sources"):
-                st.caption("Sources: " + ", ".join(message["sources"]))
-
-    prompt = st.chat_input("Example: Explain Chapter 2 in simple language.")
-    if prompt:
-        st.session_state.chat.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        if not st.session_state.rag.ready:
-            response = "Please upload and process educational material first."
-            sources = []
-        else:
-            try:
-                with st.spinner("Searching uploaded material..."):
-                    response, sources = st.session_state.rag.agent_answer(prompt)
-            except Exception as exc:
-                response = f"AI error: {exc}"
-                sources = []
-
-        st.session_state.chat.append(
-            {"role": "assistant", "content": response, "sources": sources}
-        )
-        with st.chat_message("assistant"):
-            st.markdown(response)
-            if sources:
-                st.caption("Sources: " + ", ".join(sources))
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
