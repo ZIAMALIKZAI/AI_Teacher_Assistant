@@ -24,9 +24,10 @@ from utils import (
 )
 
 st.set_page_config(page_title="AI Teacher Assistant", page_icon="🎓", layout="wide")
-# Load custom styling
+
+# Load external responsive styling
 if os.path.exists("style.css"):
-    with open("style.css") as f:
+    with open("style.css", "r", encoding="utf-8") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 TEMP_DIR = "temp_output"
