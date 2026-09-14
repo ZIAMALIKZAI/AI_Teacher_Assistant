@@ -1,0 +1,54 @@
+/* Clean styling for AI Teacher Assistant */
+
+/* 1. Page width & spacing */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    max-width: 1100px;
+}
+
+/* 2. White card box around tabs */
+div[data-testid="stTabs"] {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* 3. Tab button styling */
+button[data-baseweb="tab"] {
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 8px 16px;
+}
+
+button[aria-selected="true"] {
+    background-color: #e0edff !important;
+    color: #1d4ed8 !important;
+}
+
+/* 4. Blue action buttons */
+div.stButton > button[kind="primary"] {
+    background-color: #2563eb;
+    color: white;
+    font-weight: bold;
+    border-radius: 8px;
+    border: none;
+    padding: 8px 18px;
+}
+
+div.stButton > button[kind="primary"]:hover {
+    background-color: #1d4ed8;
+    color: white;
+}
+
+/* 5. Rounded input fields */
+div[data-baseweb="input"] {
+    border-radius: 8px !important;
+}
+
+/* 6. Clean sidebar background */
+section[data-testid="stSidebar"] {
+    background-color: #f8fafc;
+}
