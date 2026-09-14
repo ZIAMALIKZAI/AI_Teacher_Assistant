@@ -29,8 +29,8 @@ TEMP_DIR = "temp_output"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 # App Header
-st.title("🎓 AI Teacher Assistant")
-st.caption("RAG Syllabus Engine, Exam Generator, Digital Certificates & QR Attendance")
+st.title("🎓 Well Come To AI Teacher Assistant")
+st.caption("Empowering Teachers with AI — Lesson Notes, Exam Papers, Result Cards & Attendance")
 
 # Sidebar Configuration
 with st.sidebar:
