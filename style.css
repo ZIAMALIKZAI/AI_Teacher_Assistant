@@ -1,135 +1,154 @@
 /* ==========================================================================
-   AI Teacher Assistant - Ultra Modern Theme with Animated Tabs & Buttons
+   AI Teacher Assistant - Ultra-Premium Educational Dashboard Theme
    ========================================================================== */
 
-/* 1. Global Background with Soft Mesh Gradient */
-.stApp {
-    background: radial-gradient(circle at 10% 20%, rgba(239, 246, 255, 0.8) 0%, rgba(243, 244, 246, 0.9) 50%, rgba(238, 242, 255, 0.8) 100%),
-                linear-gradient(135deg, #f0fdf4 0%, #e0e7ff 50%, #fdf2f8 100%) !important;
-    background-attachment: fixed !important;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-    color: #1e293b !important;
-}
-
-/* 2. Responsive Content Container */
-.main .block-container {
-    padding-top: 2rem !important;
-    padding-bottom: 4rem !important;
-    padding-left: 1.5rem !important;
-    padding-right: 1.5rem !important;
-    max-width: 1200px !important;
-}
-
-/* ==========================================================================
-   3. ANIMATED TAB CONTAINER & TABS
-   ========================================================================== */
-
-/* Glassmorphic Container */
-div[data-testid="stTabs"] {
-    background: rgba(255, 255, 255, 0.75) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.8) !important;
-    border-radius: 20px !important;
-    padding: 1.5rem !important;
-    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.05),
-                0 4px 6px -2px rgba(0, 0, 0, 0.02) !important;
-    transition: all 0.3s ease-in-out !important;
-}
-
-div[data-testid="stTabs"]:hover {
-    box-shadow: 0 20px 35px -5px rgba(37, 99, 235, 0.08) !important;
-}
-
-/* Tab Bar Navigation Header */
-div[data-baseweb="tab-list"] {
-    display: flex !important;
-    gap: 10px !important;
-    background: rgba(241, 245, 249, 0.6) !important;
-    padding: 8px !important;
-    border-radius: 14px !important;
-    border: 1px solid #e2e8f0 !important;
-    overflow-x: auto !important;
-}
-
-/* Inactive Tab Base Styling & Shimmer Preparation */
-button[data-baseweb="tab"] {
-    position: relative !important;
-    overflow: hidden !important;
-    font-weight: 600 !important;
-    font-size: 0.95rem !important;
-    border-radius: 10px !important;
-    padding: 10px 20px !important;
-    color: #475569 !important;
-    background: transparent !important;
-    border: none !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    cursor: pointer !important;
-}
-
-/* Shimmer Sweep Animation on Hover */
-button[data-baseweb="tab"]::before {
-    content: "" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: -100% !important;
-    width: 60% !important;
-    height: 100% !important;
-    background: linear-gradient(
-        120deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.6) 50%,
-        rgba(255, 255, 255, 0) 100%
-    ) !important;
-    transform: skewX(-20deg) !important;
-    transition: all 0.6s ease !important;
-}
-
-button[data-baseweb="tab"]:hover::before {
-    left: 180% !important;
-}
-
-button[data-baseweb="tab"]:hover {
-    color: #1d4ed8 !important;
-    background: rgba(255, 255, 255, 0.7) !important;
-    transform: translateY(-2px) !important;
-}
-
-/* Spring Click Feedback */
-button[data-baseweb="tab"]:active {
-    transform: scale(0.96) !important;
-}
-
-/* Active Selected Tab Glow & Floating Pill */
-button[aria-selected="true"] {
-    background: #ffffff !important;
-    color: #1d4ed8 !important;
-    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.18) !important;
-    transform: translateY(-1px) !important;
-    border: 1px solid #bfdbfe !important;
-    font-weight: 700 !important;
-}
-
-/* Glowing Animated Underline Bar under Active Tab */
-@keyframes underlineGlow {
+/* 1. Global Animated Ambient Canvas */
+@keyframes meshCanvas {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
 }
 
-div[data-baseweb="tab-highlight"] {
-    background: linear-gradient(90deg, #2563eb, #4f46e5, #06b6d4) !important;
-    background-size: 200% 200% !important;
-    animation: underlineGlow 3s ease infinite !important;
-    height: 3px !important;
-    border-radius: 9999px !important;
+.stApp {
+    background: linear-gradient(-45deg, #f8fafc, #eff6ff, #f5f3ff, #f0fdf4) !important;
+    background-size: 400% 400% !important;
+    animation: meshCanvas 18s ease infinite !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    color: #0f172a !important;
 }
 
-/* Smooth Fade-In Animation for Tab Body Content */
-@keyframes tabFadeIn {
+/* 2. Responsive Core Container */
+.main .block-container {
+    padding-top: 1.8rem !important;
+    padding-bottom: 4rem !important;
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+    max-width: 1250px !important;
+}
+
+/* ==========================================================================
+   3. HIGH-VISIBILITY MODERN SIDEBAR
+   ========================================================================== */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+    border-right: 2px solid #e2e8f0 !important;
+    box-shadow: 4px 0 20px rgba(15, 23, 42, 0.06) !important;
+}
+
+section[data-testid="stSidebar"] .block-container {
+    padding: 2rem 1.25rem !important;
+}
+
+/* Sidebar Headings & Badges */
+section[data-testid="stSidebar"] h2, 
+section[data-testid="stSidebar"] h3 {
+    color: #1e3a8a !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em !important;
+    padding-bottom: 6px !important;
+    border-bottom: 2px solid #3b82f6 !important;
+    margin-bottom: 1.2rem !important;
+}
+
+/* Sidebar Input Label Visibility */
+section[data-testid="stSidebar"] label p {
+    font-weight: 700 !important;
+    font-size: 0.88rem !important;
+    color: #334155 !important;
+}
+
+/* ==========================================================================
+   4. CIRCULAR "PILL" ANIMATED TABS
+   ========================================================================== */
+div[data-testid="stTabs"] {
+    background: rgba(255, 255, 255, 0.88) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(226, 232, 240, 0.9) !important;
+    border-radius: 24px !important;
+    padding: 1.6rem !important;
+    box-shadow: 0 12px 36px -8px rgba(15, 23, 42, 0.07) !important;
+    transition: box-shadow 0.3s ease !important;
+}
+
+div[data-testid="stTabs"]:hover {
+    box-shadow: 0 20px 40px -10px rgba(37, 99, 235, 0.12) !important;
+}
+
+/* Pill Navigation Rail */
+div[data-baseweb="tab-list"] {
+    display: flex !important;
+    gap: 12px !important;
+    background: #f1f5f9 !important;
+    padding: 8px 10px !important;
+    border-radius: 9999px !important; /* Fully circular rounded track */
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.04) !important;
+    overflow-x: auto !important;
+}
+
+/* Fully Circular Pill Tab Buttons */
+button[data-baseweb="tab"] {
+    position: relative !important;
+    overflow: hidden !important;
+    font-weight: 700 !important;
+    font-size: 0.92rem !important;
+    border-radius: 9999px !important; /* Fully circular pills */
+    padding: 10px 22px !important;
+    color: #475569 !important;
+    background: transparent !important;
+    border: 1.5px solid transparent !important;
+    transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Shimmer Light Reflection on Hover */
+button[data-baseweb="tab"]::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: -120% !important;
+    width: 60% !important;
+    height: 100% !important;
+    background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.7) 50%, transparent 100%) !important;
+    transform: skewX(-25deg) !important;
+    transition: all 0.6s ease !important;
+}
+
+button[data-baseweb="tab"]:hover::before {
+    left: 200% !important;
+}
+
+button[data-baseweb="tab"]:hover {
+    color: #2563eb !important;
+    background: #ffffff !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Active Selected Circular Tab */
+button[aria-selected="true"] {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+    color: #ffffff !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35) !important;
+    transform: translateY(-1px) scale(1.02) !important;
+}
+
+button[aria-selected="true"]:hover {
+    color: #ffffff !important;
+    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
+}
+
+/* Remove default flat bar underline */
+div[data-baseweb="tab-highlight"] {
+    display: none !important;
+}
+
+/* Tab Panel Fade-In */
+@keyframes tabSlideUp {
     from {
         opacity: 0;
-        transform: translateY(6px);
+        transform: translateY(8px);
     }
     to {
         opacity: 1;
@@ -138,153 +157,129 @@ div[data-baseweb="tab-highlight"] {
 }
 
 div[data-testid="stTabs"] > div[role="tabpanel"] {
-    animation: tabFadeIn 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    animation: tabSlideUp 0.32s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    padding-top: 1rem !important;
 }
 
 /* ==========================================================================
-   4. ANIMATED PRIMARY BUTTONS
+   5. FLOWING GRADIENT BUTTONS
    ========================================================================== */
-
-@keyframes gradientShift {
+@keyframes btnGradient {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
 }
 
-@keyframes pulseGlow {
-    0% { box-shadow: 0 4px 15px rgba(37, 99, 235, 0.35); }
-    50% { box-shadow: 0 6px 24px rgba(79, 70, 229, 0.55); }
-    100% { box-shadow: 0 4px 15px rgba(37, 99, 235, 0.35); }
-}
-
 div.stButton > button[kind="primary"] {
     position: relative !important;
     overflow: hidden !important;
-    background: linear-gradient(135deg, #2563eb, #4f46e5, #06b6d4, #2563eb) !important;
+    background: linear-gradient(135deg, #2563eb, #6366f1, #0ea5e9, #2563eb) !important;
     background-size: 300% 300% !important;
-    animation: gradientShift 6s ease infinite, pulseGlow 3s ease-in-out infinite !important;
+    animation: btnGradient 5s ease infinite !important;
     color: #ffffff !important;
     font-weight: 700 !important;
     font-size: 0.95rem !important;
-    letter-spacing: 0.3px !important;
     border: none !important;
-    border-radius: 12px !important;
-    padding: 0.7rem 1.8rem !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    z-index: 1 !important;
-}
-
-div.stButton > button[kind="primary"]::after {
-    content: "" !important;
-    position: absolute !important;
-    top: -50% !important;
-    left: -60% !important;
-    width: 40% !important;
-    height: 200% !important;
-    background: linear-gradient(
-        to right,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.35) 50%,
-        rgba(255, 255, 255, 0) 100%
-    ) !important;
-    transform: rotate(25deg) !important;
-    transition: all 0.75s ease-in-out !important;
-    pointer-events: none !important;
-}
-
-div.stButton > button[kind="primary"]:hover::after {
-    left: 140% !important;
+    border-radius: 9999px !important; /* Circular pill buttons */
+    padding: 0.75rem 2rem !important;
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35) !important;
+    transition: all 0.25s ease !important;
 }
 
 div.stButton > button[kind="primary"]:hover {
-    transform: translateY(-3px) scale(1.02) !important;
-    box-shadow: 0 10px 28px rgba(37, 99, 235, 0.6) !important;
+    transform: translateY(-2.5px) scale(1.02) !important;
+    box-shadow: 0 10px 25px rgba(37, 99, 235, 0.5) !important;
 }
 
 div.stButton > button[kind="primary"]:active {
-    transform: translateY(1px) scale(0.98) !important;
-    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4) !important;
+    transform: translateY(1px) scale(0.97) !important;
 }
 
-/* ==========================================================================
-   5. SECONDARY & DOWNLOAD BUTTONS
-   ========================================================================== */
 div.stButton > button[kind="secondary"],
 div.stDownloadButton > button {
-    position: relative !important;
-    background: rgba(255, 255, 255, 0.95) !important;
+    background: #ffffff !important;
     color: #1e293b !important;
-    border: 1.5px solid #cbd5e1 !important;
-    border-radius: 10px !important;
-    font-weight: 600 !important;
-    padding: 0.6rem 1.4rem !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    overflow: hidden !important;
+    border: 2px solid #cbd5e1 !important;
+    border-radius: 9999px !important; /* Circular pill buttons */
+    font-weight: 700 !important;
+    padding: 0.65rem 1.6rem !important;
+    transition: all 0.22s ease !important;
 }
 
 div.stButton > button[kind="secondary"]:hover,
 div.stDownloadButton > button:hover {
-    background: #ffffff !important;
     border-color: #2563eb !important;
     color: #2563eb !important;
     transform: translateY(-2px) !important;
-    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.15) !important;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.12) !important;
 }
 
 /* ==========================================================================
-   6. INPUT FIELDS, SIDEBAR & TABLES
+   6. HIGH-DEFINITION INPUT CARDS & CONTROLS
    ========================================================================== */
 div[data-baseweb="input"],
 div[data-baseweb="select"],
 div[data-baseweb="textarea"] {
-    border-radius: 10px !important;
-    background: rgba(255, 255, 255, 0.9) !important;
-    border: 1.5px solid #cbd5e1 !important;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+    border-radius: 12px !important;
+    background: #ffffff !important;
+    border: 2px solid #cbd5e1 !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02) !important;
     transition: border-color 0.2s, box-shadow 0.2s !important;
 }
 
 div[data-baseweb="input"]:focus-within,
 div[data-baseweb="select"]:focus-within,
 div[data-baseweb="textarea"]:focus-within {
-    border-color: #3b82f6 !important;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18) !important;
 }
 
-section[data-testid="stSidebar"] {
-    background: rgba(255, 255, 255, 0.7) !important;
-    backdrop-filter: blur(14px) !important;
-    -webkit-backdrop-filter: blur(14px) !important;
-    border-right: 1px solid rgba(226, 232, 240, 0.8) !important;
-}
-
+/* Tables & Results Dataframe */
 div[data-testid="stDataFrame"] {
     background: #ffffff !important;
-    border-radius: 12px !important;
-    border: 1px solid #e2e8f0 !important;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03) !important;
+    border-radius: 16px !important;
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.04) !important;
     overflow: hidden !important;
 }
 
+/* Gradient Header Title */
 h1 {
-    font-weight: 800 !important;
-    letter-spacing: -0.025em !important;
-    background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%) !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.03em !important;
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #4f46e5 100%) !important;
     -webkit-background-clip: text !important;
     -webkit-text-fill-color: transparent !important;
 }
 
-/* Mobile Responsiveness */
+/* Sleek Thin Scrollbars */
+::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+}
+::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+    background: #94a3b8;
+    border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+}
+
+/* Mobile Touch Optimization */
 @media (max-width: 768px) {
-    .main .block-container {
-        padding-left: 0.75rem !important;
-        padding-right: 0.75rem !important;
-    }
-    div[data-testid="stTabs"] {
-        padding: 0.85rem !important;
+    div[data-baseweb="tab-list"] {
+        border-radius: 16px !important;
+        padding: 6px !important;
+        gap: 6px !important;
     }
     button[data-baseweb="tab"] {
-        font-size: 0.85rem !important;
-        padding: 8px 12px !important;
+        font-size: 0.82rem !important;
+        padding: 8px 14px !important;
+    }
+    div.stButton > button {
+        width: 100% !important;
     }
 }
