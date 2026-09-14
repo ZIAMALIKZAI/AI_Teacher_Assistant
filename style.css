@@ -1,5 +1,5 @@
 /* ==========================================================================
-   AI Teacher Assistant - Ultra Modern Theme with Animated Interactive Buttons
+   AI Teacher Assistant - Ultra Modern Theme with Animated Tabs & Buttons
    ========================================================================== */
 
 /* 1. Global Background with Soft Mesh Gradient */
@@ -20,13 +20,17 @@
     max-width: 1200px !important;
 }
 
-/* 3. Glassmorphic Navigation Tabs Container */
+/* ==========================================================================
+   3. ANIMATED TAB CONTAINER & TABS
+   ========================================================================== */
+
+/* Glassmorphic Container */
 div[data-testid="stTabs"] {
     background: rgba(255, 255, 255, 0.75) !important;
     backdrop-filter: blur(12px) !important;
     -webkit-backdrop-filter: blur(12px) !important;
     border: 1px solid rgba(255, 255, 255, 0.8) !important;
-    border-radius: 18px !important;
+    border-radius: 20px !important;
     padding: 1.5rem !important;
     box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.05),
                 0 4px 6px -2px rgba(0, 0, 0, 0.02) !important;
@@ -37,40 +41,108 @@ div[data-testid="stTabs"]:hover {
     box-shadow: 0 20px 35px -5px rgba(37, 99, 235, 0.08) !important;
 }
 
-/* 4. Tab Navigation Header Buttons */
+/* Tab Bar Navigation Header */
 div[data-baseweb="tab-list"] {
-    gap: 8px !important;
-    border-bottom: 2px solid #e2e8f0 !important;
-    padding-bottom: 6px !important;
+    display: flex !important;
+    gap: 10px !important;
+    background: rgba(241, 245, 249, 0.6) !important;
+    padding: 8px !important;
+    border-radius: 14px !important;
+    border: 1px solid #e2e8f0 !important;
     overflow-x: auto !important;
 }
 
+/* Inactive Tab Base Styling & Shimmer Preparation */
 button[data-baseweb="tab"] {
+    position: relative !important;
+    overflow: hidden !important;
     font-weight: 600 !important;
     font-size: 0.95rem !important;
     border-radius: 10px !important;
-    padding: 10px 18px !important;
+    padding: 10px 20px !important;
     color: #475569 !important;
     background: transparent !important;
     border: none !important;
-    transition: all 0.3s ease !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    cursor: pointer !important;
+}
+
+/* Shimmer Sweep Animation on Hover */
+button[data-baseweb="tab"]::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: -100% !important;
+    width: 60% !important;
+    height: 100% !important;
+    background: linear-gradient(
+        120deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.6) 50%,
+        rgba(255, 255, 255, 0) 100%
+    ) !important;
+    transform: skewX(-20deg) !important;
+    transition: all 0.6s ease !important;
+}
+
+button[data-baseweb="tab"]:hover::before {
+    left: 180% !important;
 }
 
 button[data-baseweb="tab"]:hover {
-    background-color: rgba(239, 246, 255, 0.8) !important;
-    color: #2563eb !important;
+    color: #1d4ed8 !important;
+    background: rgba(255, 255, 255, 0.7) !important;
     transform: translateY(-2px) !important;
 }
 
+/* Spring Click Feedback */
+button[data-baseweb="tab"]:active {
+    transform: scale(0.96) !important;
+}
+
+/* Active Selected Tab Glow & Floating Pill */
 button[aria-selected="true"] {
     background: #ffffff !important;
     color: #1d4ed8 !important;
-    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15) !important;
+    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.18) !important;
+    transform: translateY(-1px) !important;
     border: 1px solid #bfdbfe !important;
+    font-weight: 700 !important;
+}
+
+/* Glowing Animated Underline Bar under Active Tab */
+@keyframes underlineGlow {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+div[data-baseweb="tab-highlight"] {
+    background: linear-gradient(90deg, #2563eb, #4f46e5, #06b6d4) !important;
+    background-size: 200% 200% !important;
+    animation: underlineGlow 3s ease infinite !important;
+    height: 3px !important;
+    border-radius: 9999px !important;
+}
+
+/* Smooth Fade-In Animation for Tab Body Content */
+@keyframes tabFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+div[data-testid="stTabs"] > div[role="tabpanel"] {
+    animation: tabFadeIn 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 /* ==========================================================================
-   5. ANIMATED PRIMARY BUTTONS (Shimmer + Dynamic Flowing Gradient + Glow)
+   4. ANIMATED PRIMARY BUTTONS
    ========================================================================== */
 
 @keyframes gradientShift {
@@ -102,7 +174,6 @@ div.stButton > button[kind="primary"] {
     z-index: 1 !important;
 }
 
-/* Shimmer Light Reflection Sweep Across the Button */
 div.stButton > button[kind="primary"]::after {
     content: "" !important;
     position: absolute !important;
@@ -136,7 +207,7 @@ div.stButton > button[kind="primary"]:active {
 }
 
 /* ==========================================================================
-   6. ANIMATED SECONDARY & DOWNLOAD BUTTONS
+   5. SECONDARY & DOWNLOAD BUTTONS
    ========================================================================== */
 div.stButton > button[kind="secondary"],
 div.stDownloadButton > button {
@@ -160,12 +231,9 @@ div.stDownloadButton > button:hover {
     box-shadow: 0 6px 16px rgba(37, 99, 235, 0.15) !important;
 }
 
-div.stButton > button[kind="secondary"]:active,
-div.stDownloadButton > button:active {
-    transform: translateY(1px) !important;
-}
-
-/* 7. Rounded Form Inputs & Dropdowns */
+/* ==========================================================================
+   6. INPUT FIELDS, SIDEBAR & TABLES
+   ========================================================================== */
 div[data-baseweb="input"],
 div[data-baseweb="select"],
 div[data-baseweb="textarea"] {
@@ -183,7 +251,6 @@ div[data-baseweb="textarea"]:focus-within {
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
 }
 
-/* 8. Modern Glassmorphism Sidebar */
 section[data-testid="stSidebar"] {
     background: rgba(255, 255, 255, 0.7) !important;
     backdrop-filter: blur(14px) !important;
@@ -191,7 +258,6 @@ section[data-testid="stSidebar"] {
     border-right: 1px solid rgba(226, 232, 240, 0.8) !important;
 }
 
-/* 9. Card-like DataFrames and Tables */
 div[data-testid="stDataFrame"] {
     background: #ffffff !important;
     border-radius: 12px !important;
@@ -200,7 +266,6 @@ div[data-testid="stDataFrame"] {
     overflow: hidden !important;
 }
 
-/* 10. Floating Header Banner */
 h1 {
     font-weight: 800 !important;
     letter-spacing: -0.025em !important;
@@ -209,22 +274,17 @@ h1 {
     -webkit-text-fill-color: transparent !important;
 }
 
-/* 11. Mobile Responsiveness */
+/* Mobile Responsiveness */
 @media (max-width: 768px) {
     .main .block-container {
         padding-left: 0.75rem !important;
         padding-right: 0.75rem !important;
-        padding-top: 1rem !important;
     }
     div[data-testid="stTabs"] {
         padding: 0.85rem !important;
-        border-radius: 14px !important;
     }
     button[data-baseweb="tab"] {
         font-size: 0.85rem !important;
         padding: 8px 12px !important;
-    }
-    div.stButton > button {
-        width: 100% !important;
     }
 }
