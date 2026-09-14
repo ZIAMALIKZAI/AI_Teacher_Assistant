@@ -35,12 +35,12 @@ st.caption("RAG Syllabus Engine, Exam Generator, Digital Certificates & QR Atten
 # Sidebar Configuration
 with st.sidebar:
     st.header("🏫 School & Exam Settings")
-    sb_school = st.text_input("School Name", value="City Public High School")
+    sb_school = st.text_input("School Name", value="Govt. Fida Muhammad Khan High School Yar Hussain-Swabi")
     sb_exam = st.text_input("Exam Type", value="Annual Examination")
-    sb_year = st.text_input("Academic Year", value="2025-2026")
-    sb_class = st.text_input("Class", value="Grade 10")
+    sb_year = st.text_input("Academic Year", value="2026-2027")
+    sb_class = st.text_input("Class", value="Grade 10 or Class 10 ")
     sb_subject = st.text_input("Subject", value="Computer Science")
-    sb_sub_code = st.text_input("Subject Code", value="CS-101")
+    sb_sub_code = st.text_input("Subject Code", value="CS-101  or just any value")
     
     st.markdown("---")
     custom_key = st.text_input("Gemini API Key (Optional Override)", type="password")
