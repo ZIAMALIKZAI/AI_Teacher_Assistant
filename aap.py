@@ -24,6 +24,10 @@ from utils import (
 )
 
 st.set_page_config(page_title="AI Teacher Assistant", page_icon="🎓", layout="wide")
+# Load custom styling
+if os.path.exists("style.css"):
+    with open("style.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 TEMP_DIR = "temp_output"
 os.makedirs(TEMP_DIR, exist_ok=True)
