@@ -3,7 +3,7 @@ app.py: Streamlit web application interface for AI Teacher Assistant.
 Tabs include: Upload Material, Notes, Question Papers, Marks & Certificates,
 QR Code Attendance, and Chat Assistant.
 """
-
+from master_timetable import render_master_timetable_page
 import os
 import streamlit as st
 import pandas as pd
@@ -54,13 +54,13 @@ with st.sidebar:
 
 # Navigation Tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📁 Upload Material",
-    "📚 Notes Generator",
-    "📝 Question Paper",
-    "📊 Marks & Certificates",
-    "📷 QR Attendance",
-    "🤖 AI Assistant"
+    "📁 Upload Material", "📚 Notes Generator", "📝 Question Paper",
+    "📊 Marks & Certificates", "📷 QR Attendance", "🗓️ Master Timetable"
 ])
+
+# Then under your tabs:
+with tab6:
+    render_master_timetable_page(school_name=sb_school)
 
 # TAB 1: Document Upload & Indexing
 with tab1:
