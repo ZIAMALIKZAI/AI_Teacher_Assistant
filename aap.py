@@ -261,6 +261,56 @@ with tab5:
                 st.dataframe(log_df.tail(5), use_container_width=True)
                 with open("attendance_log.csv", "rb") as f:
                     st.download_button("📥 Download Full Attendance Sheet (.csv)", data=f, file_name="attendance_log.csv", mime="text/csv")
+                    st.markdown("---")
+        st.markdown(
+            "#### 📦 Bulk Student QR Card Generation (Upload CSV/Excel)"
+        )
+        csv_sample = (
+            "Roll_No,Student_Name,Class\n101,Ahmad Ali,Grade 10\n102,Bilal"
+            " Khan,Grade 10\n103,Ayesha Bibi,Grade 10\n104,Hamza Javed,Grade"
+            " 10\n105,Zainab Fatima,Grade 9\n106,Usman Ghani,Grade 9\n"
+        )
+        st.download_button(
+            "📥 Download Student CSV Template",
+            data=csv_sample,
+            file_name="students_qr_bulk_template.csv",
+            mime="text/csv",
+        )
+
+        bulk_file = st.file_uploader(
+            "Upload Student List CSV",
+            type=["csv", "xlsx"],
+            key="bulk_qr_uploader",
+        )
+        if bulk_file:
+          if bulk_file.name.endswith(".csv"):
+            df_bulk = pd.read_csv(bulk_file)
+          else:
+            df_bulk = pd.read_excel(bulk_file)
+          st.dataframe(df_bulk.head(8), use_container_width=True)
+
+          if st.button(
+              "⚡ Generate All QR Cards at Once (ZIP Archive)", type="primary"
+          ):
+            from utils import generate_bulk_student_qr_zip
+
+            zip_path = os.path.join(TEMP_DIR, "All_Student_QR_Cards.zip")
+            with st.spinner(
+                f"Generating QR cards for {len(df_bulk)} students..."
+            ):
+              out_zip, total_gen = generate_bulk_student_qr_zip(
+                  df_bulk, zip_path
+              )
+            st.success(
+                f"Successfully generated {total_gen} Student QR Cards!"
+            )
+            with open(out_zip, "rb") as zf:
+              st.download_button(
+                  label="📥 Download All QR Cards (.ZIP)",
+                  data=zf,
+                  file_name="All_Student_QR_Cards.zip",
+                  mime="application/zip",
+              )
 
 # TAB 6: AI Chat Assistant
 with tab6:
@@ -283,3 +333,10 @@ with tab6:
                 ans = agent_chat_router(user_query)
             st.markdown(ans)
             st.session_state.chat_history.append({"role": "assistant", "content": ans})
+            TAB 6: Teacher Attendance
+   with tab6:
+     render_teacher_attendance_page()
+
+   # TAB 7: Master Timetable
+   with tab7:
+     render_master_timetable_page(school_name=sb_school)
