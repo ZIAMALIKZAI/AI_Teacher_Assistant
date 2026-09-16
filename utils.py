@@ -322,3 +322,28 @@ def generate_marks_certificate_pdf(student_data: dict, school_info: dict, output
 
     doc.build(elements)
     return output_path
+import zipfile
+
+def generate_bulk_student_qr_zip(df_students: pd.DataFrame, output_zip_path: str) -> tuple[str, int]:
+    temp_card_dir = "temp_qr_batch"
+    os.makedirs(temp_card_dir, exist_ok=True)
+    col_map = {}
+    for c in df_students.columns:
+        norm = str(c).strip().lower().replace(" ", "_")
+        if "roll" in norm: col_map[c] = "Roll_No"
+        elif "student" in norm or "name" in norm: col_map[c] = "Student_Name"
+        elif "class" in norm or "grade" in norm: col_map[c] = "Class"
+    df_students = df_students.rename(columns=col_map)
+    count = 0
+    with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for _, row in df_students.iterrows():
+            roll = str(row.get("Roll_No", "")).strip()
+            name = str(row.get("Student_Name", "Student")).strip()
+            cls = str(row.get("Class", "Grade")).strip()
+            if roll:
+                img_name = f"QR_{cls.replace(' ', '_')}_Roll_{roll}.png"
+                img_path = os.path.join(temp_card_dir, img_name)
+                generate_student_qr_card(roll, name, cls, img_path)
+                zipf.write(img_path, arcname=img_name)
+                count += 1
+    return output_zip_path, count
