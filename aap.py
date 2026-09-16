@@ -27,54 +27,32 @@ from utils import (
 
 st.set_page_config(page_title="AI Teacher Assistant", page_icon="🎓", layout="wide")
 
-# Load external responsive styling
-if os.path.exists("style.css"):
-    with open("style.css", "r", encoding="utf-8") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-TEMP_DIR = "temp_output"
-os.makedirs(TEMP_DIR, exist_ok=True)
-
-# App Header
-st.title("🎓 Well Come To AI Teacher Assistant")
-st.caption("Empowering Teachers with AI — Lesson Notes, Exam Papers, Result Cards & Attendance")
-
 # Sidebar Configuration
 with st.sidebar:
     st.header("🏫 School & Exam Settings")
-    sb_school = st.text_input("School Name", value="Govt. Fida Muhammad Khan High School Yar Hussain-Swabi")
+    sb_school = st.text_input("School Name", value="City Public High School")
     sb_exam = st.text_input("Exam Type", value="Annual Examination")
-    sb_year = st.text_input("Academic Year", value="2026-2027")
-    sb_class = st.text_input("Class", value="Grade 10 or Class 10 ")
+    sb_year = st.text_input("Academic Year", value="2025-2026")
+    sb_class = st.text_input("Class", value="Grade 10")
     sb_subject = st.text_input("Subject", value="Computer Science")
-    sb_sub_code = st.text_input("Subject Code", value="CS-101  or just any value")
+    sb_sub_code = st.text_input("Subject Code", value="CS-101")
     
     st.markdown("---")
     custom_key = st.text_input("Gemini API Key (Optional Override)", type="password")
     if custom_key:
-        os.environ["GEMINI_API_KEY"] = custom_key
+        os.environ["GEMINI_API_KEY"] = custom_key.strip().strip('"').strip("'")
+        os.environ["GOOGLE_API_KEY"] = custom_key.strip().strip('"').strip("'")
 
-# Navigation Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📁 Upload Material", "📚 Notes Generator", "📝 Question Paper",
-    "📊 Marks & Certificates", "📷 QR Attendance", "🗓️ Master Timetable"
+# Navigation Tabs (Must have ZERO spaces at the start of the line)
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📁 Upload Material",
+    "📚 Notes Generator",
+    "📝 Question Paper",
+    "📊 Marks & Certificates",
+    "📷 Student QR Attendance",
+    "👨‍🏫 Teacher Attendance & WhatsApp",
+    "🗓️ Master Timetable",
 ])
-
-# Then under your tabs:
-with tab6:
-    render_master_timetable_page(school_name=sb_school)
-
-# TAB 1: Document Upload & Indexing
-
-   tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-       "📁 Upload Material",
-       "📚 Notes Generator",
-       "📝 Question Paper",
-       "📊 Marks & Certificates",
-       "📷 Student QR Attendance",
-       "👨‍🏫 Teacher Attendance & WhatsApp",
-       "🗓️ Master Timetable",
-   ])
     if st.button("⚡ Process & Index Documents into Qdrant", type="primary"):
         if uploaded_files:
             saved_paths = []
