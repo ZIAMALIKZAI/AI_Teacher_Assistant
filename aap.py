@@ -4,6 +4,8 @@ Tabs include: Upload Material, Notes, Question Papers, Marks & Certificates,
 QR Code Attendance, and Chat Assistant.
 """
 from master_timetable import render_master_timetable_page
+from teacher_attendance import render_teacher_attendance_page
+from master_timetable import render_master_timetable_page
 import os
 import streamlit as st
 import pandas as pd
@@ -63,13 +65,16 @@ with tab6:
     render_master_timetable_page(school_name=sb_school)
 
 # TAB 1: Document Upload & Indexing
-with tab1:
-    st.subheader("Upload Educational Material")
-    uploaded_files = st.file_uploader(
-        "Upload textbooks, chapters, or syllabus documents (PDF, JPG, PNG)",
-        type=["pdf", "png", "jpg", "jpeg"],
-        accept_multiple_files=True
-    )
+
+   tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+       "📁 Upload Material",
+       "📚 Notes Generator",
+       "📝 Question Paper",
+       "📊 Marks & Certificates",
+       "📷 Student QR Attendance",
+       "👨‍🏫 Teacher Attendance & WhatsApp",
+       "🗓️ Master Timetable",
+   ])
     if st.button("⚡ Process & Index Documents into Qdrant", type="primary"):
         if uploaded_files:
             saved_paths = []
