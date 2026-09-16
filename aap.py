@@ -1,11 +1,7 @@
 """
 app.py: Streamlit web application interface for AI Teacher Assistant.
-Tabs include: Upload Material, Notes, Question Papers, Marks & Certificates,
-QR Code Attendance, and Chat Assistant.
 """
-from master_timetable import render_master_timetable_page
-from teacher_attendance import render_teacher_attendance_page
-from master_timetable import render_master_timetable_page
+
 import os
 import streamlit as st
 import pandas as pd
@@ -22,10 +18,25 @@ from utils import (
     generate_marks_certificate_pdf,
     generate_student_qr_card,
     decode_qr_image,
-    record_attendance
+    record_attendance,
+    generate_bulk_student_qr_zip
 )
+from master_timetable import render_master_timetable_page
+from teacher_attendance import render_teacher_attendance_page
 
 st.set_page_config(page_title="AI Teacher Assistant", page_icon="🎓", layout="wide")
+
+# Load external responsive styling
+if os.path.exists("style.css"):
+    with open("style.css", "r", encoding="utf-8") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+TEMP_DIR = "temp_output"
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+# App Header
+st.title("🎓 AI Teacher Assistant")
+st.caption("Smart Teaching Assistant: Curriculum Intelligence, Assessment Builder & Student Analytics")
 
 # Sidebar Configuration
 with st.sidebar:
@@ -40,10 +51,11 @@ with st.sidebar:
     st.markdown("---")
     custom_key = st.text_input("Gemini API Key (Optional Override)", type="password")
     if custom_key:
-        os.environ["GEMINI_API_KEY"] = custom_key.strip().strip('"').strip("'")
-        os.environ["GOOGLE_API_KEY"] = custom_key.strip().strip('"').strip("'")
+        clean_k = custom_key.strip().strip('"').strip("'")
+        os.environ["GEMINI_API_KEY"] = clean_k
+        os.environ["GOOGLE_API_KEY"] = clean_k
 
-# Navigation Tabs (Must have ZERO spaces at the start of the line)
+# Navigation Tabs
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📁 Upload Material",
     "📚 Notes Generator",
@@ -53,6 +65,15 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "👨‍🏫 Teacher Attendance & WhatsApp",
     "🗓️ Master Timetable",
 ])
+
+# TAB 1: Document Upload & Indexing
+with tab1:
+    st.subheader("Upload Educational Material")
+    uploaded_files = st.file_uploader(
+        "Upload textbooks, chapters, or syllabus documents (PDF, JPG, PNG)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True
+    )
     if st.button("⚡ Process & Index Documents into Qdrant", type="primary"):
         if uploaded_files:
             saved_paths = []
@@ -81,7 +102,7 @@ with tab2:
 
     if st.button("Generate Study Notes", type="primary"):
         if note_topic:
-            with st.spinner("Consulting knowledge base with Gemini 2.5 Flash..."):
+            with st.spinner("Consulting knowledge base with Gemini..."):
                 notes = generate_study_notes(note_topic, note_type, note_lang)
             st.markdown(notes)
             pdf_path = os.path.join(TEMP_DIR, "Study_Notes.pdf")
@@ -124,8 +145,8 @@ with tab3:
             "subject": sb_subject, "subject_code": sb_sub_code, "exam_time": p_time,
             "total_marks": int(p_total), "mcq_count": int(mcq_n), "mcq_marks": int(mcq_m),
             "short_count": int(short_n), "short_marks": int(short_m),
-            "long_count": int(long_n), "long_marks": int(long_m),
-            "syllabus": p_syllabus, "difficulty": p_diff
+            "long_count": int(long_count) if 'long_count' in locals() else int(long_n),
+            "long_marks": int(long_m), "syllabus": p_syllabus, "difficulty": p_diff
         }
         with st.spinner("Synthesizing balanced exam paper and official answer key..."):
             paper, key = generate_exam_paper(criteria)
@@ -161,7 +182,6 @@ with tab4:
             out.write(marks_file.getbuffer())
         df_marks = parse_marks_file(m_path)
         st.session_state["marks_df"] = df_marks
-        # Reset index to avoid index-column collision in PyArrow
         st.dataframe(df_marks.head(10).reset_index(drop=True), use_container_width=True)
 
     st.markdown("---")
@@ -193,7 +213,7 @@ with tab4:
         else:
             st.warning("Please upload an award list first.")
 
-# TAB 5: QR Code Attendance
+# TAB 5: Student QR Attendance
 with tab5:
     st.subheader("Student QR Code Attendance System")
     col_qr_gen, col_qr_scan = st.columns(2)
@@ -239,82 +259,37 @@ with tab5:
                 st.dataframe(log_df.tail(5), use_container_width=True)
                 with open("attendance_log.csv", "rb") as f:
                     st.download_button("📥 Download Full Attendance Sheet (.csv)", data=f, file_name="attendance_log.csv", mime="text/csv")
-                    st.markdown("---")
-        st.markdown(
-            "#### 📦 Bulk Student QR Card Generation (Upload CSV/Excel)"
-        )
-        csv_sample = (
-            "Roll_No,Student_Name,Class\n101,Ahmad Ali,Grade 10\n102,Bilal"
-            " Khan,Grade 10\n103,Ayesha Bibi,Grade 10\n104,Hamza Javed,Grade"
-            " 10\n105,Zainab Fatima,Grade 9\n106,Usman Ghani,Grade 9\n"
-        )
-        st.download_button(
-            "📥 Download Student CSV Template",
-            data=csv_sample,
-            file_name="students_qr_bulk_template.csv",
-            mime="text/csv",
-        )
 
-        bulk_file = st.file_uploader(
-            "Upload Student List CSV",
-            type=["csv", "xlsx"],
-            key="bulk_qr_uploader",
-        )
-        if bulk_file:
-          if bulk_file.name.endswith(".csv"):
+    st.markdown("---")
+    st.markdown("#### 📦 Bulk Student QR Card Generation (Upload CSV/Excel)")
+    csv_sample = "Roll_No,Student_Name,Class\n101,Ahmad Ali,Grade 10\n102,Bilal Khan,Grade 10\n103,Ayesha Bibi,Grade 10\n104,Hamza Javed,Grade 10\n105,Zainab Fatima,Grade 9\n106,Usman Ghani,Grade 9\n"
+    st.download_button("📥 Download Student CSV Template", data=csv_sample, file_name="students_qr_bulk_template.csv", mime="text/csv")
+
+    bulk_file = st.file_uploader("Upload Student List CSV", type=["csv", "xlsx"], key="bulk_qr_uploader")
+    if bulk_file:
+        if bulk_file.name.endswith(".csv"):
             df_bulk = pd.read_csv(bulk_file)
-          else:
+        else:
             df_bulk = pd.read_excel(bulk_file)
-          st.dataframe(df_bulk.head(8), use_container_width=True)
+        st.dataframe(df_bulk.head(8), use_container_width=True)
 
-          if st.button(
-              "⚡ Generate All QR Cards at Once (ZIP Archive)", type="primary"
-          ):
-            from utils import generate_bulk_student_qr_zip
-
+        if st.button("⚡ Generate All QR Cards at Once (ZIP Archive)", type="primary"):
             zip_path = os.path.join(TEMP_DIR, "All_Student_QR_Cards.zip")
-            with st.spinner(
-                f"Generating QR cards for {len(df_bulk)} students..."
-            ):
-              out_zip, total_gen = generate_bulk_student_qr_zip(
-                  df_bulk, zip_path
-              )
-            st.success(
-                f"Successfully generated {total_gen} Student QR Cards!"
-            )
+            with st.spinner(f"Generating QR cards for {len(df_bulk)} students..."):
+                out_zip, total_gen = generate_bulk_student_qr_zip(df_bulk, zip_path)
+            st.success(f"Successfully generated {total_gen} Student QR Cards!")
             with open(out_zip, "rb") as zf:
-              st.download_button(
-                  label="📥 Download All QR Cards (.ZIP)",
-                  data=zf,
-                  file_name="All_Student_QR_Cards.zip",
-                  mime="application/zip",
-              )
+                st.download_button(
+                    label="📥 Download All QR Cards (.ZIP)",
+                    data=zf,
+                    file_name="All_Student_QR_Cards.zip",
+                    mime="application/zip"
+                )
 
-# TAB 6: AI Chat Assistant
+# TAB 6: Teacher Attendance
 with tab6:
-    st.subheader("Chat with your Uploaded Documents")
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+    render_teacher_attendance_page()
 
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    user_query = st.chat_input("Ask a question about your uploaded syllabus or chapters...")
-    if user_query:
-        st.session_state.chat_history.append({"role": "user", "content": user_query})
-        with st.chat_message("user"):
-            st.markdown(user_query)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Searching syllabus..."):
-                ans = agent_chat_router(user_query)
-            st.markdown(ans)
-            st.session_state.chat_history.append({"role": "assistant", "content": ans})
-            TAB 6: Teacher Attendance
-   with tab6:
-     render_teacher_attendance_page()
-
-   # TAB 7: Master Timetable
-   with tab7:
-     render_master_timetable_page(school_name=sb_school)
+# TAB 7: Master Timetable
+with tab7:
+    render_master_timetable_page(school_name=sb_school)
