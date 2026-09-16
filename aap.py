@@ -1,19 +1,7 @@
 """
 app.py: Streamlit web application interface for AI Teacher Assistant.
 """
-# --- Authentication and Login Check ---
-from auth_manager import render_login_gate, render_superadmin_dashboard, get_school_workspace_dir
 
-current_user = render_login_gate()
-if not current_user:
-    st.stop()
-
-if current_user["role"] == "superadmin":
-    render_superadmin_dashboard()
-    st.stop()
-
-TEMP_DIR = get_school_workspace_dir(current_user["school_id"])
-# --------------------------------------
 import os
 import streamlit as st
 import pandas as pd
@@ -38,6 +26,19 @@ from teacher_attendance import render_teacher_attendance_page
 
 st.set_page_config(page_title="AI Teacher Assistant", page_icon="🎓", layout="wide")
 
+# --- Authentication and Login Check ---
+from auth_manager import render_login_gate, render_superadmin_dashboard, get_school_workspace_dir
+
+current_user = render_login_gate()
+if not current_user:
+    st.stop()
+
+if current_user["role"] == "superadmin":
+    render_superadmin_dashboard()
+    st.stop()
+
+TEMP_DIR = get_school_workspace_dir(current_user["school_id"])
+# --------------------------------------
 # Load external responsive styling
 if os.path.exists("style.css"):
     with open("style.css", "r", encoding="utf-8") as f:
