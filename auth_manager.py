@@ -1,12 +1,16 @@
 """
 auth_manager.py: Authentication, Multi-Tenant Isolation, Role-Based Access Control,
-and Trial Expiration Management for AI Teacher Assistant.
+Account Deletion, SuperAdmin Credentials Visibility, and Email OTP Password Recovery.
 """
 
 import os
 import json
+import shutil
+import random
+import smtplib
 import hashlib
 import datetime
+from email.mime.text import MIMEText
 import streamlit as st
 import pandas as pd
 
@@ -29,14 +33,15 @@ def load_users_db() -> dict:
         except Exception:
             pass
 
-    # Initial database containing default SuperAdmin account
     initial_db = {
         "superadmin": {
             "username": "superadmin",
+            "plain_password": "admin123",
             "password_hash": hash_password("admin123"),
             "role": "superadmin",
             "school_name": "System Central Administration",
             "school_id": "system_admin",
+            "email": "admin@schoolportal.local",
             "created_at": datetime.date.today().isoformat(),
             "trial_days": 9999,
             "is_active": True
@@ -51,8 +56,66 @@ def save_users_db(db: dict):
         json.dump(db, f, indent=4)
 
 
+def delete_user_account(username: str) -> tuple[bool, str]:
+    """Permanently deletes a school account and purges its storage directory."""
+    db = load_users_db()
+    u = username.strip().lower()
+
+    if u not in db:
+        return False, f"User '{u}' not found."
+    if db[u].get("role") == "superadmin":
+        return False, "SuperAdmin account cannot be deleted."
+
+    school_id = db[u].get("school_id", u)
+    del db[u]
+    save_users_db(db)
+
+    # Purge isolated school folder
+    school_path = os.path.join(BASE_DATA_DIR, school_id)
+    if os.path.exists(school_path):
+        try:
+            shutil.rmtree(school_path)
+        except Exception:
+            pass
+
+    return True, f"Account '{u}' and all school data deleted successfully."
+
+
+def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
+    """
+    Sends an OTP code via SMTP if configured in st.secrets or environment variables.
+    Falls back gracefully to on-screen delivery for development/testing.
+    """
+    smtp_server = os.getenv("SMTP_SERVER", st.secrets.get("SMTP_SERVER", "smtp.gmail.com") if hasattr(st, "secrets") else "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", st.secrets.get("SMTP_PORT", 587) if hasattr(st, "secrets") else 587))
+    smtp_user = os.getenv("SMTP_USER", st.secrets.get("SMTP_USER", "") if hasattr(st, "secrets") else "")
+    smtp_pass = os.getenv("SMTP_PASS", st.secrets.get("SMTP_PASS", "") if hasattr(st, "secrets") else "")
+
+    if smtp_user and smtp_pass:
+        try:
+            msg = MIMEText(
+                f"Hello,\n\nYour one-time password (OTP) for password recovery on AI Teacher Assistant is: {otp_code}\n"
+                "This code is valid for 10 minutes. Do not share it with anyone.\n\n"
+                "Regards,\nAI Teacher Assistant Security Team"
+            )
+            msg["Subject"] = "🔐 Password Recovery OTP - AI Teacher Assistant"
+            msg["From"] = smtp_user
+            msg["To"] = recipient_email
+
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            return True, f"OTP sent to {recipient_email}."
+        except Exception as e:
+            return False, f"SMTP error: {e}"
+
+    # Return True with notification if SMTP credentials are not yet configured
+    return True, f"Development Mode: OTP for {recipient_email} is [{otp_code}] (Configure SMTP in Secrets for real email dispatch)."
+
+
 def authenticate_user(username: str, password: str) -> tuple[bool, str, dict]:
-    """Validates login credentials, account status, and trial period."""
+    """Validates login credentials, account status, and trial duration."""
     db = load_users_db()
     u = username.strip().lower()
 
@@ -67,7 +130,6 @@ def authenticate_user(username: str, password: str) -> tuple[bool, str, dict]:
     if hash_password(password) != user_info["password_hash"]:
         return False, "❌ Incorrect password.", {}
 
-    # Check trial expiration (SuperAdmin is exempt)
     if user_info["role"] != "superadmin":
         created = datetime.date.fromisoformat(user_info["created_at"])
         trial_days = user_info.get("trial_days", 14)
@@ -75,27 +137,31 @@ def authenticate_user(username: str, password: str) -> tuple[bool, str, dict]:
         today = datetime.date.today()
 
         if today > expiry_date:
-            return False, f"🔒 Trial period expired on {expiry_date.strftime('%d-%b-%Y')}. Please contact SuperAdmin to renew your license.", {}
+            return False, f"🔒 Trial period expired on {expiry_date.strftime('%d-%b-%Y')}. Contact SuperAdmin for renewal.", {}
 
     return True, "Login successful.", user_info
 
 
 def get_school_workspace_dir(school_id: str) -> str:
-    """Provides isolated storage paths per school."""
     path = os.path.join(BASE_DATA_DIR, school_id)
     os.makedirs(path, exist_ok=True)
     return path
 
 
 def render_superadmin_dashboard():
-    """Administrative management view to create and control school accounts."""
-    st.subheader("🛡️ SuperAdmin Control Panel")
-    st.caption("Manage School Accounts, Issue Usernames/Passwords, and Configure Trial Lifespans.")
+    """SuperAdmin Management Suite with plain passwords, school names, and account deletion."""
+    st.subheader("🛡️ SuperAdmin Central Management Portal")
+    st.caption("Inspect Credentials, Create or Remove Accounts, and Manage School Trial Durations.")
 
     db = load_users_db()
 
-    tab_users, tab_create = st.tabs(["📋 Registered Schools & License Status", "➕ Create New School Account"])
+    tab_users, tab_create, tab_delete = st.tabs([
+        "📋 Registered Schools & Credentials",
+        "➕ Create New School Account",
+        "🗑️ Delete School Account"
+    ])
 
+    # 1. Registered Schools Table with Passwords & School Names
     with tab_users:
         rows = []
         today = datetime.date.today()
@@ -115,9 +181,10 @@ def render_superadmin_dashboard():
 
             rows.append({
                 "Username": u,
-                "School Name": data.get("school_name"),
-                "School ID": data.get("school_id"),
-                "Created Date": data.get("created_at"),
+                "Password": data.get("plain_password", "********"),
+                "School Name": data.get("school_name", "-"),
+                "Registered Email": data.get("email", "-"),
+                "School ID": data.get("school_id", "-"),
                 "Trial Period": f"{trial_days} Days",
                 "Expiry Date": expiry.strftime("%Y-%m-%d"),
                 "Days Left": max(0, days_left),
@@ -128,16 +195,16 @@ def render_superadmin_dashboard():
             df_users = pd.DataFrame(rows)
             st.dataframe(df_users, use_container_width=True)
 
-            st.markdown("##### ⚙️ Manage Existing School Account")
+            st.markdown("##### ⚙️ Update Account Settings")
             col_m1, col_m2, col_m3 = st.columns(3)
             with col_m1:
-                selected_user = st.selectbox("Select School Account", [r["Username"] for r in rows])
+                selected_user = st.selectbox("Select Account", [r["Username"] for r in rows], key="sa_sel_usr")
             with col_m2:
-                action = st.selectbox("Action", ["Extend Trial (+30 Days)", "Extend Trial (+365 Days Full License)", "Toggle Active/Deactivate", "Reset Password"])
+                action = st.selectbox("Action", ["Extend Trial (+30 Days)", "Extend Trial (+365 Days Full License)", "Toggle Active/Deactivate", "Change Password"])
             with col_m3:
-                new_pw = st.text_input("New Password (if resetting)", type="password")
+                new_pw = st.text_input("New Password (if changing)", type="password", key="sa_new_pw")
 
-            if st.button("Apply Account Update", type="primary"):
+            if st.button("Apply Account Modification", type="primary"):
                 u_target = db[selected_user]
                 if action == "Extend Trial (+30 Days)":
                     u_target["trial_days"] = u_target.get("trial_days", 14) + 30
@@ -146,51 +213,57 @@ def render_superadmin_dashboard():
                 elif action == "Extend Trial (+365 Days Full License)":
                     u_target["trial_days"] = u_target.get("trial_days", 14) + 365
                     u_target["is_active"] = True
-                    st.success(f"Upgraded {selected_user} to Full License (365 days)!")
+                    st.success(f"Upgraded {selected_user} to 365 Days Full License!")
                 elif action == "Toggle Active/Deactivate":
                     u_target["is_active"] = not u_target.get("is_active", True)
-                    st.success(f"Toggled active state for {selected_user} to {u_target['is_active']}!")
-                elif action == "Reset Password":
+                    st.success(f"Toggled status for {selected_user} to active={u_target['is_active']}!")
+                elif action == "Change Password":
                     if new_pw.strip():
+                        u_target["plain_password"] = new_pw.strip()
                         u_target["password_hash"] = hash_password(new_pw.strip())
-                        st.success(f"Password reset for {selected_user}!")
+                        st.success(f"Password updated for {selected_user}!")
                     else:
                         st.error("Please enter a new password.")
 
                 save_users_db(db)
                 st.rerun()
         else:
-            st.info("No school accounts registered yet. Create one below.")
+            st.info("No school accounts registered yet. Use the next tab to register one.")
 
+    # 2. Add New School Account
     with tab_create:
         st.markdown("##### ➕ Register New School Client")
         with st.form("create_school_form"):
-            new_s_name = st.text_input("School Full Name", placeholder="e.g. Army Public School Peshawar")
+            new_s_name = st.text_input("School Full Name", placeholder="e.g. Government High School Chota Lahore")
             col_u1, col_u2 = st.columns(2)
             with col_u1:
-                new_u = st.text_input("Username (Unique)", placeholder="e.g. aps_peshawar")
+                new_u = st.text_input("Username (Unique, lowercase)", placeholder="e.g. ghs_swabi")
+                new_email = st.text_input("Registered Recovery Email", placeholder="e.g. principal@ghs.edu.pk")
             with col_u2:
-                new_p = st.text_input("Assigned Password", type="password")
+                new_p = st.text_input("Assigned Password", type="text", placeholder="e.g. School@1234")
+                trial_option = st.selectbox("Trial Lifespan", [7, 14, 30, 90, 365], index=1)
 
-            trial_option = st.selectbox("Trial Lifespan", [7, 14, 30, 90, 365], index=1)
             submit_btn = st.form_submit_button("Register & Grant Access", type="primary")
 
             if submit_btn:
                 clean_u = new_u.strip().lower()
                 clean_s = new_s_name.strip()
+                clean_e = new_email.strip().lower()
 
-                if not clean_u or not new_p.strip() or not clean_s:
-                    st.error("All fields are required.")
+                if not clean_u or not new_p.strip() or not clean_s or not clean_e:
+                    st.error("All fields (School Name, Username, Email, Password) are required.")
                 elif clean_u in db:
-                    st.error(f"Username '{clean_u}' already exists! Choose another.")
+                    st.error(f"Username '{clean_u}' already exists! Please choose another.")
                 else:
                     school_id = clean_u.replace(" ", "_")
                     db[clean_u] = {
                         "username": clean_u,
+                        "plain_password": new_p.strip(),
                         "password_hash": hash_password(new_p.strip()),
                         "role": "school_admin",
                         "school_name": clean_s,
                         "school_id": school_id,
+                        "email": clean_e,
                         "created_at": datetime.date.today().isoformat(),
                         "trial_days": trial_option,
                         "is_active": True
@@ -200,9 +273,32 @@ def render_superadmin_dashboard():
                     st.success(f"✅ School Account '{clean_s}' registered successfully with a {trial_option}-day trial!")
                     st.rerun()
 
+    # 3. Delete School Account
+    with tab_delete:
+        st.markdown("##### 🗑️ Permanent School Account Removal")
+        st.warning("⚠️ Warning: Deleting a school account permanently erases its user credentials, documents, and student marks records from disk.")
+
+        non_admin_users = [u for u, d in db.items() if d.get("role") != "superadmin"]
+        if non_admin_users:
+            del_user = st.selectbox("Select Account to Permanently Delete", non_admin_users, key="del_user_select")
+            confirm_box = st.checkbox(f"Confirm permanent deletion of account '{del_user}' and all its stored data.")
+
+            if st.button("Delete Account Permanently", type="primary"):
+                if confirm_box:
+                    ok, msg = delete_user_account(del_user)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                else:
+                    st.error("Please check the confirmation box to proceed.")
+        else:
+            st.info("No school accounts available to delete.")
+
 
 def render_login_gate() -> dict | None:
-    """Displays login gate and returns active user credentials session dict upon authentication."""
+    """Renders the login gate, registration verification, and email OTP recovery workflow."""
     if "authenticated_user" in st.session_state and st.session_state["authenticated_user"]:
         return st.session_state["authenticated_user"]
 
@@ -210,27 +306,86 @@ def render_login_gate() -> dict | None:
     with col2:
         st.markdown(
             """
-            <div style="text-align: center; margin-bottom: 2rem;">
+            <div style="text-align: center; margin-bottom: 1.5rem;">
                 <h2>🎓 AI Teacher Assistant</h2>
-                <p style="color: #64748b;">Enterprise Multi-Tenant Educational Portal</p>
+                <p style="color: #64748b; font-weight: 500;">Secure Institutional Portal</p>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        with st.container():
-            st.markdown("#### 🔐 Portal Sign In")
-            login_username = st.text_input("Username", key="login_user_input")
-            login_password = st.text_input("Password", type="password", key="login_pass_input")
+        login_tab, forgot_tab = st.tabs(["🔐 Sign In", "🔑 Forgot Password?"])
 
-            if st.button("Sign In to Portal", type="primary", use_container_width=True):
+        with login_tab:
+            login_username = st.text_input("Username", key="gate_user_input")
+            login_password = st.text_input("Password", type="password", key="gate_pass_input")
+
+            if st.button("Sign In to Workspace", type="primary", use_container_width=True):
                 success, msg, user_data = authenticate_user(login_username, login_password)
                 if success:
                     st.session_state["authenticated_user"] = user_data
-                    st.success("Access Granted! Loading your dashboard...")
+                    st.success("Access Granted! Launching workspace...")
                     st.rerun()
                 else:
                     st.error(msg)
 
-            st.caption("Default SuperAdmin login: `superadmin` / `admin123`")
+            st.caption("SuperAdmin default login: `superadmin` / `admin123`")
+
+        with forgot_tab:
+            st.markdown("##### 📩 Password Recovery via Email OTP")
+            recovery_email = st.text_input("Enter Registered School Email", key="rec_email_in")
+
+            if st.button("Send 6-Digit OTP", key="btn_send_otp"):
+                clean_email = recovery_email.strip().lower()
+                db = load_users_db()
+                matched_user = None
+
+                for u, data in db.items():
+                    if data.get("email", "").strip().lower() == clean_email:
+                        matched_user = u
+                        break
+
+                if not matched_user:
+                    st.error("No account found registered with that email address.")
+                else:
+                    # Generate 6-digit OTP
+                    generated_otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
+                    st.session_state["active_otp"] = generated_otp
+                    st.session_state["otp_target_user"] = matched_user
+                    st.session_state["otp_timestamp"] = datetime.datetime.now()
+
+                    ok, send_msg = send_otp_email(clean_email, generated_otp)
+                    if ok:
+                        st.success(send_msg)
+                    else:
+                        st.error(send_msg)
+
+            # Verification and Password Reset Block
+            if "active_otp" in st.session_state:
+                st.markdown("---")
+                st.markdown("##### 🔢 Enter Verification Code")
+                entered_otp = st.text_input("6-Digit OTP Code", max_chars=6, key="entered_otp_val")
+                new_pass = st.text_input("Set New Password", type="password", key="otp_new_pass")
+
+                if st.button("Verify OTP & Reset Password", type="primary", use_container_width=True):
+                    # Check 10-minute expiry
+                    time_diff = (datetime.datetime.now() - st.session_state["otp_timestamp"]).total_seconds()
+                    if time_diff > 600:
+                        st.error("OTP has expired. Please request a new code.")
+                    elif entered_otp.strip() == st.session_state["active_otp"]:
+                        if not new_pass.strip():
+                            st.error("Password cannot be blank.")
+                        else:
+                            db = load_users_db()
+                            target_u = st.session_state["otp_target_user"]
+                            db[target_u]["plain_password"] = new_pass.strip()
+                            db[target_u]["password_hash"] = hash_password(new_pass.strip())
+                            save_users_db(db)
+
+                            del st.session_state["active_otp"]
+                            del st.session_state["otp_target_user"]
+                            st.success(f"✅ Password for '{target_u}' reset successfully! You can now sign in.")
+                    else:
+                        st.error("Invalid OTP code. Please check and try again.")
+
     return None
