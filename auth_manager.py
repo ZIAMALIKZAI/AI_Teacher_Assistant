@@ -149,9 +149,22 @@ def get_school_workspace_dir(school_id: str) -> str:
 
 
 def render_superadmin_dashboard():
-    """SuperAdmin Management Suite with plain passwords, school names, and account deletion."""
-    st.subheader("🛡️ SuperAdmin Central Management Portal")
-    st.caption("Inspect Credentials, Create or Remove Accounts, and Manage School Trial Durations.")
+    """SuperAdmin Management Suite with plain passwords, school names, account deletion, and Logout."""
+    
+    # --- Top Navigation Bar with Sign Out Button ---
+    col_sa1, col_sa2 = st.columns([4, 1])
+    with col_sa1:
+        st.subheader("🛡️ SuperAdmin Central Management Portal")
+        st.caption("Inspect Credentials, Create or Remove Accounts, and Manage School Trial Durations.")
+    with col_sa2:
+        if st.button("🚪 Sign Out", key="sa_logout_btn", type="secondary", use_container_width=True):
+            if "authenticated_user" in st.session_state:
+                del st.session_state["authenticated_user"]
+            # Clear browser query params to prevent auto re-login
+            st.query_params.clear()
+            st.rerun()
+
+    st.markdown("---")
 
     db = load_users_db()
 
@@ -240,8 +253,8 @@ def render_superadmin_dashboard():
                 new_u = st.text_input("Username (Unique, lowercase)", placeholder="e.g. ghs_swabi")
                 new_email = st.text_input("Registered Recovery Email", placeholder="e.g. principal@ghs.edu.pk")
             with col_u2:
-                new_p = st.text_input("Assigned Password", type="default",placeholder="e.g. School@1234")
-                trial_option = st.selectbox("Trial Lifespan", [1, 14, 30, 90, 365], index=1)
+                new_p = st.text_input("Assigned Password", placeholder="e.g. School@1234")
+                trial_option = st.selectbox("Trial Lifespan", [7, 14, 30, 90, 365], index=1)
 
             submit_btn = st.form_submit_button("Register & Grant Access", type="primary")
 
@@ -276,7 +289,7 @@ def render_superadmin_dashboard():
     # 3. Delete School Account
     with tab_delete:
         st.markdown("##### 🗑️ Permanent School Account Removal")
-        st.warning("⚠️ Warning: Deleting a school account permanently erases its user credentials, documents, and student marks records from disk.")
+        st.warning("⚠️ Warning: Deleting a school account permanently erases its credentials, documents, and student marks records from disk.")
 
         non_admin_users = [u for u, d in db.items() if d.get("role") != "superadmin"]
         if non_admin_users:
@@ -295,12 +308,24 @@ def render_superadmin_dashboard():
                     st.error("Please check the confirmation box to proceed.")
         else:
             st.info("No school accounts available to delete.")
-
-
 def render_login_gate() -> dict | None:
-    """Renders the login gate, registration verification, and email OTP recovery workflow."""
+    """Renders the login gate, registration verification, and preserves session across browser refresh."""
+    
+    # 1. Check if user is already logged in session_state
     if "authenticated_user" in st.session_state and st.session_state["authenticated_user"]:
         return st.session_state["authenticated_user"]
+
+    # 2. Check if a valid session exists in query params (survives page refresh / F5)
+    params = st.query_params
+    if "session_user" in params and "session_token" in params:
+        q_user = params.get("session_user", "").strip().lower()
+        q_token = params.get("session_token", "").strip()
+        db = load_users_db()
+        if q_user in db and db[q_user].get("is_active", True):
+            # Verify session token matches password hash
+            if db[q_user]["password_hash"] == q_token:
+                st.session_state["authenticated_user"] = db[q_user]
+                return db[q_user]
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -324,6 +349,9 @@ def render_login_gate() -> dict | None:
                 success, msg, user_data = authenticate_user(login_username, login_password)
                 if success:
                     st.session_state["authenticated_user"] = user_data
+                    # Store session params in URL so refresh/F5 will NOT log you out
+                    st.query_params["session_user"] = user_data["username"]
+                    st.query_params["session_token"] = user_data["password_hash"]
                     st.success("Access Granted! Launching workspace...")
                     st.rerun()
                 else:
@@ -348,7 +376,6 @@ def render_login_gate() -> dict | None:
                 if not matched_user:
                     st.error("No account found registered with that email address.")
                 else:
-                    # Generate 6-digit OTP
                     generated_otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
                     st.session_state["active_otp"] = generated_otp
                     st.session_state["otp_target_user"] = matched_user
@@ -360,7 +387,6 @@ def render_login_gate() -> dict | None:
                     else:
                         st.error(send_msg)
 
-            # Verification and Password Reset Block
             if "active_otp" in st.session_state:
                 st.markdown("---")
                 st.markdown("##### 🔢 Enter Verification Code")
@@ -368,7 +394,6 @@ def render_login_gate() -> dict | None:
                 new_pass = st.text_input("Set New Password", type="password", key="otp_new_pass")
 
                 if st.button("Verify OTP & Reset Password", type="primary", use_container_width=True):
-                    # Check 10-minute expiry
                     time_diff = (datetime.datetime.now() - st.session_state["otp_timestamp"]).total_seconds()
                     if time_diff > 600:
                         st.error("OTP has expired. Please request a new code.")
