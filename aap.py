@@ -93,7 +93,7 @@ with tab1:
             for f in uploaded_files:
                 path = os.path.join(TEMP_DIR, f.name)
                 with open(path, "wb") as out:
-                    out.write(f.getbuffer())
+                    out.write(f.getbuffer()) 
                 saved_paths.append(path)
 
             with st.spinner("Extracting text and indexing into Qdrant..."):
