@@ -240,7 +240,7 @@ def render_superadmin_dashboard():
                 new_u = st.text_input("Username (Unique, lowercase)", placeholder="e.g. ghs_swabi")
                 new_email = st.text_input("Registered Recovery Email", placeholder="e.g. principal@ghs.edu.pk")
             with col_u2:
-                new_p = st.text_input("Assigned Password", placeholder="e.g. School@1234")
+                new_p = st.text_input("Assigned Password", type="default",placeholder="e.g. School@1234")
                 trial_option = st.selectbox("Trial Lifespan", [1, 14, 30, 90, 365], index=1)
 
             submit_btn = st.form_submit_button("Register & Grant Access", type="primary")
