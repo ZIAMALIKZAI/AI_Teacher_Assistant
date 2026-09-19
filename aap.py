@@ -38,6 +38,24 @@ if current_user["role"] == "superadmin":
     st.stop()
 
 TEMP_DIR = get_school_workspace_dir(current_user["school_id"])
+
+# --- Top Bar with School Name, License Status & Sign Out Button ---
+top_col1, top_col2 = st.columns([3, 1])
+
+with top_col1:
+    school_title = current_user.get("school_name", "Academic High School")
+    st.title(f"🏫 {school_title}")
+    st.caption(f"Logged in as: **{current_user['username']}** | Workspace ID: `{current_user.get('school_id', '')}`")
+
+with top_col2:
+    if st.button("🚪 Sign Out", key="main_logout_btn", type="secondary", use_container_width=True):
+        if "authenticated_user" in st.session_state:
+            del st.session_state["authenticated_user"]
+        st.query_params.clear()
+        st.rerun()
+
+st.markdown("---")
+# ------------------------------------------------------------------
 # --------------------------------------
 # Load external responsive styling
 if os.path.exists("style.css"):
