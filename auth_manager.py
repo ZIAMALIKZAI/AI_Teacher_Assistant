@@ -149,9 +149,7 @@ def get_school_workspace_dir(school_id: str) -> str:
 
 
 def render_superadmin_dashboard():
-    """SuperAdmin Management Suite with plain passwords, school names, account deletion, and Logout."""
-    
-    # --- Top Navigation Bar with Sign Out Button ---
+    # Top Bar: Title on the left, Logout button on the right
     col_sa1, col_sa2 = st.columns([4, 1])
     with col_sa1:
         st.subheader("🛡️ SuperAdmin Central Management Portal")
@@ -160,7 +158,6 @@ def render_superadmin_dashboard():
         if st.button("🚪 Sign Out", key="sa_logout_btn", type="secondary", use_container_width=True):
             if "authenticated_user" in st.session_state:
                 del st.session_state["authenticated_user"]
-            # Clear browser query params to prevent auto re-login
             st.query_params.clear()
             st.rerun()
 
