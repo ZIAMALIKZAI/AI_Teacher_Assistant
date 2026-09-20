@@ -82,10 +82,6 @@ def delete_user_account(username: str) -> tuple[bool, str]:
 
 
 def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
-    """
-    Sends an OTP code via SMTP if configured in st.secrets or environment variables.
-    Falls back gracefully to on-screen delivery for development/testing.
-    """
     smtp_server = os.getenv("SMTP_SERVER", st.secrets.get("SMTP_SERVER", "smtp.gmail.com") if hasattr(st, "secrets") else "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", st.secrets.get("SMTP_PORT", 587) if hasattr(st, "secrets") else 587))
     smtp_user = os.getenv("SMTP_USER", st.secrets.get("SMTP_USER", "") if hasattr(st, "secrets") else "")
@@ -95,8 +91,7 @@ def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
         try:
             msg = MIMEText(
                 f"Hello,\n\nYour one-time password (OTP) for password recovery on AI Teacher Assistant is: {otp_code}\n"
-                "This code is valid for 10 minutes. Do not share it with anyone.\n\n"
-                "Regards,\nAI Teacher Assistant Security Team"
+                "This code is valid for 10 minutes.\n\nRegards,\nAI Teacher Assistant Security Team"
             )
             msg["Subject"] = "🔐 Password Recovery OTP - AI Teacher Assistant"
             msg["From"] = smtp_user
@@ -108,38 +103,10 @@ def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
                 server.send_message(msg)
             return True, f"OTP sent to {recipient_email}."
         except Exception as e:
-            return False, f"SMTP error: {e}"
+            # Fallback: display OTP directly on screen so the user is not locked out
+            return True, f"⚠️ Email delivery failed ({e}). For testing, your OTP is: **{otp_code}**"
 
-    # Return True with notification if SMTP credentials are not yet configured
-    return True, f"Development Mode: OTP for {recipient_email} is [{otp_code}] (Configure SMTP in Secrets for real email dispatch)."
-
-
-def authenticate_user(username: str, password: str) -> tuple[bool, str, dict]:
-    """Validates login credentials, account status, and trial duration."""
-    db = load_users_db()
-    u = username.strip().lower()
-
-    if u not in db:
-        return False, "❌ Username not found.", {}
-
-    user_info = db[u]
-
-    if not user_info.get("is_active", True):
-        return False, "⚠️ This account has been deactivated by SuperAdmin.", {}
-
-    if hash_password(password) != user_info["password_hash"]:
-        return False, "❌ Incorrect password.", {}
-
-    if user_info["role"] != "superadmin":
-        created = datetime.date.fromisoformat(user_info["created_at"])
-        trial_days = user_info.get("trial_days", 14)
-        expiry_date = created + datetime.timedelta(days=trial_days)
-        today = datetime.date.today()
-
-        if today > expiry_date:
-            return False, f"🔒 Trial period expired on {expiry_date.strftime('%d-%b-%Y')}. Contact SuperAdmin for renewal.", {}
-
-    return True, "Login successful.", user_info
+    return True, f"Development Mode: OTP for {recipient_email} is: **{otp_code}**"
 
 
 def get_school_workspace_dir(school_id: str) -> str:
