@@ -367,7 +367,7 @@ def render_login_gate() -> dict | None:
                 else:
                     st.error(msg)
 
-            st.caption("SuperAdmin default login: `superadmin` / `admin123`")
+            
 
         with forgot_tab:
             st.markdown("##### 📩 Password Recovery via Email OTP")
