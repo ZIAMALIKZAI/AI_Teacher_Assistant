@@ -82,16 +82,29 @@ def delete_user_account(username: str) -> tuple[bool, str]:
 
 
 def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
-    smtp_server = os.getenv("SMTP_SERVER", st.secrets.get("SMTP_SERVER", "smtp.gmail.com") if hasattr(st, "secrets") else "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", st.secrets.get("SMTP_PORT", 587) if hasattr(st, "secrets") else 587))
-    smtp_user = os.getenv("SMTP_USER", st.secrets.get("SMTP_USER", "") if hasattr(st, "secrets") else "")
-    smtp_pass = os.getenv("SMTP_PASS", st.secrets.get("SMTP_PASS", "") if hasattr(st, "secrets") else "")
+    """
+    Sends an OTP code via SMTP if configured in st.secrets or environment variables.
+    Cleans up any hidden spaces from credentials automatically.
+    """
+    # 1. Safely read credentials and strip any hidden spaces
+    raw_server = st.secrets.get("SMTP_SERVER", os.getenv("SMTP_SERVER", "smtp.gmail.com"))
+    raw_port = st.secrets.get("SMTP_PORT", os.getenv("SMTP_PORT", 587))
+    raw_user = st.secrets.get("SMTP_USER", os.getenv("SMTP_USER", ""))
+    raw_pass = st.secrets.get("SMTP_PASS", os.getenv("SMTP_PASS", ""))
 
+    smtp_server = str(raw_server).strip()
+    smtp_port = int(raw_port)
+    smtp_user = str(raw_user).strip()
+    # Removes all accidental spaces in the 16-letter password:
+    smtp_pass = str(raw_pass).replace(" ", "").strip()
+
+    # 2. Check if credentials exist
     if smtp_user and smtp_pass:
         try:
             msg = MIMEText(
-                f"Hello,\n\nYour one-time password (OTP) for password recovery on AI Teacher Assistant is: {otp_code}\n"
-                "This code is valid for 10 minutes.\n\nRegards,\nAI Teacher Assistant Security Team"
+                f"Hello,\n\nYour OTP for password recovery on AI Teacher Assistant is: {otp_code}\n"
+                "This code is valid for 10 minutes.\n\n"
+                "Regards,\nAI Teacher Assistant Security Team"
             )
             msg["Subject"] = "🔐 Password Recovery OTP - AI Teacher Assistant"
             msg["From"] = smtp_user
@@ -103,11 +116,9 @@ def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
                 server.send_message(msg)
             return True, f"OTP sent to {recipient_email}."
         except Exception as e:
-            # Fallback: display OTP directly on screen so the user is not locked out
-            return True, f"⚠️ Email delivery failed ({e}). For testing, your OTP is: **{otp_code}**"
+            return False, f"SMTP error: {e}"
 
-    return True, f"Development Mode: OTP for {recipient_email} is: **{otp_code}**"
-
+    return True, f"Development Mode: OTP for {recipient_email} is [{otp_code}]"
 
 def get_school_workspace_dir(school_id: str) -> str:
     path = os.path.join(BASE_DATA_DIR, school_id)
