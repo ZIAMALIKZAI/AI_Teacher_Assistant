@@ -12,3 +12,4 @@ python-dotenv>=1.0.1
 torch>=2.2.0
 qrcode[pil]>=7.4.2
 opencv-python-headless>=4.10.0.84
+torchvision
