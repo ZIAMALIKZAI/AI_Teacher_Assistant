@@ -11,10 +11,8 @@ import os
 import json
 import shutil
 import random
-import smtplib
 import hashlib
 import datetime
-from email.mime.text import MIMEText
 import streamlit as st
 import pandas as pd
 
@@ -58,6 +56,47 @@ def load_users_db() -> dict:
 def save_users_db(db: dict):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, indent=4)
+
+
+def authenticate_user(username: str, password: str) -> tuple[bool, str, dict | None]:
+    """
+    Verifies user credentials against the users database.
+    Returns (success, message, user_data).
+    Also enforces trial/expiry checks and active status.
+    """
+    clean_u = (username or "").strip().lower()
+    clean_p = (password or "").strip()
+
+    if not clean_u or not clean_p:
+        return False, "Please enter both username and password.", None
+
+    db = load_users_db()
+
+    if clean_u not in db:
+        return False, "❌ Invalid username or password.", None
+
+    user = db[clean_u]
+
+    # Verify password hash
+    if user.get("password_hash") != hash_password(clean_p):
+        return False, "❌ Invalid username or password.", None
+
+    # Check if account is active
+    if not user.get("is_active", True):
+        return False, "⛔ This account has been deactivated. Contact SuperAdmin.", None
+
+    # Check trial expiry (skip for superadmin)
+    if user.get("role") != "superadmin":
+        try:
+            created = datetime.date.fromisoformat(user["created_at"])
+            trial_days = user.get("trial_days", 14)
+            expiry = created + datetime.timedelta(days=trial_days)
+            if datetime.date.today() > expiry:
+                return False, f"🔒 Trial expired on {expiry.isoformat()}. Contact SuperAdmin to renew.", None
+        except Exception:
+            pass
+
+    return True, "✅ Login successful.", user
 
 
 def delete_user_account(username: str) -> tuple[bool, str]:
@@ -128,7 +167,10 @@ def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
     raw_pass = st.secrets.get("SMTP_PASS", os.getenv("SMTP_PASS", ""))
 
     smtp_server = str(raw_server).strip()
-    smtp_port = int(raw_port)
+    try:
+        smtp_port = int(raw_port)
+    except Exception:
+        smtp_port = 587
     smtp_user = str(raw_user).strip().strip('"').strip("'")
     smtp_pass = str(raw_pass).replace(" ", "").strip().strip('"').strip("'")
 
@@ -154,6 +196,7 @@ def send_otp_email(recipient_email: str, otp_code: str) -> tuple[bool, str]:
             return True, f"⚠️ Mail server timed out ({e}). Your OTP is: **{otp_code}**"
 
     return True, f"Development Mode: OTP for {recipient_email} is [{otp_code}]"
+
 
 def get_school_workspace_dir(school_id: str) -> str:
     path = os.path.join(BASE_DATA_DIR, school_id)
@@ -318,6 +361,8 @@ def render_superadmin_dashboard():
                     st.error("Please check the confirmation box to proceed.")
         else:
             st.info("No school accounts available to delete.")
+
+
 def render_login_gate() -> dict | None:
     """Renders the login gate, registration verification, and preserves session across browser refresh."""
     
@@ -366,8 +411,6 @@ def render_login_gate() -> dict | None:
                     st.rerun()
                 else:
                     st.error(msg)
-
-            
 
         with forgot_tab:
             st.markdown("##### 📩 Password Recovery via Email OTP")
